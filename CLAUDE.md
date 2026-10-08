@@ -10,5 +10,5 @@ Separate repo from the parent python-learner; its tutoring rules don't apply her
 - Never lose user code: autosave must survive reload; destructive actions (delete file, reset) need a confirm.
 - Vanilla TS + Vite + CodeMirror 6. Don't add a UI framework without asking.
 - Pin exact dependency versions; commit package-lock.json.
-- Run `npm run build` before saying a change is done (plus `npm run lint && npm test` once those scripts exist — added in step 2).
+- Run `npm run lint && npm test && npm run build` before saying a change is done.
 - Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040, vhost python.piapps.dev on piapps.

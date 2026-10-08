@@ -1,11 +1,38 @@
+/*
+ * Chrome around the editor. The editor's own colours come from CodeMirror
+ * (one-dark, or its default light highlighting); these variables only cover
+ * the toolbar, page background and notices.
+ *
+ * `data-theme` on <html> is set by main.ts from the stored setting, so the
+ * toolbar can never disagree with the editor.
+ */
+
 :root {
   --bg: #1e1e2e;
+  --surface: #181825;
   --fg: #cdd6f4;
   --muted: #7f849c;
+  --border: #313244;
+  --accent: #89b4fa;
+  --error-bg: #3a1f28;
+  --error-fg: #f2b8c6;
 
-  color-scheme: dark light;
+  color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f2f3f7;
+  --fg: #24273a;
+  --muted: #6c6f85;
+  --border: #d4d6e0;
+  --accent: #1e66f5;
+  --error-bg: #fde8ec;
+  --error-fg: #8c1f35;
+
+  color-scheme: light;
 }
 
 * {
@@ -14,30 +41,120 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
   background: var(--bg);
   color: var(--fg);
 }
 
-.shell {
-  max-width: 48rem;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+/* Lock the shell to the viewport so only the editor scrolls. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
 }
 
-h1 {
-  margin: 0 0 0.5rem;
-  font-size: 1.75rem;
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
-.muted {
+.brand {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--muted);
+  /* Never the reason the toolbar wraps at ~600 px. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #fafafa;
-    --fg: #24273a;
-    --muted: #6c6f85;
+.toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.group {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+button {
+  min-width: 2.25rem;
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.theme-toggle {
+  white-space: nowrap;
+}
+
+.editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Let the CodeMirror scroller own the editor's whole box. */
+.editor .cm-editor {
+  height: 100%;
+}
+
+.editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.editor .cm-scroller {
+  font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+.notice {
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+  color: var(--fg);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.notice-error {
+  color: var(--error-fg);
+  background: var(--error-bg);
+}
+
+/* Narrow window, e.g. side by side with a course tab. */
+@media (max-width: 30rem) {
+  .brand {
+    flex-basis: 100%;
+  }
+
+  .toolbar-spacer {
+    display: none;
   }
 }
