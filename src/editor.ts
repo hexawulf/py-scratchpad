@@ -7,7 +7,7 @@
  */
 
 import { basicSetup } from 'codemirror'
-import { Compartment, EditorSelection, type Extension } from '@codemirror/state'
+import { Compartment, EditorSelection, type Extension, Prec } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { indentUnit } from '@codemirror/language'
@@ -40,9 +40,28 @@ function fontSizeExtension(px: number): Extension {
  * language, the indent unit and the keymaps. Exported so tests can build an
  * `EditorState` with the real configuration and no DOM. Theme and font size
  * are deliberately not here — they are cosmetic and live in compartments.
+ *
+ * `onRun` binds Ctrl+Enter (Cmd+Enter on a Mac). It has to be `Prec.highest`:
+ * CodeMirror's own `defaultKeymap`, which `basicSetup` includes, already binds
+ * `Mod-Enter` to `insertBlankLine`, and the first binding found wins.
  */
-export function baseExtensions(): Extension[] {
+export function baseExtensions(onRun?: () => void): Extension[] {
   return [
+    ...(onRun === undefined
+      ? []
+      : [
+          Prec.highest(
+            keymap.of([
+              {
+                key: 'Mod-Enter',
+                run: () => {
+                  onRun()
+                  return true
+                },
+              },
+            ]),
+          ),
+        ]),
     // Line numbers, bracket matching, undo history, Ctrl+F search panel and
     // the default keymap (which carries Ctrl+/ comment toggling).
     basicSetup,
@@ -62,6 +81,8 @@ export interface EditorOptions {
   fontSize: number
   /** Fired on every document or selection change; debounce in the caller. */
   onChange: () => void
+  /** Ctrl+Enter / Cmd+Enter inside the editor. */
+  onRun: () => void
 }
 
 export interface EditorHandle {
@@ -70,6 +91,8 @@ export interface EditorHandle {
   getCursor: () => CursorState
   /** Replace the whole document, keeping the undo history. */
   setContent: (content: string, cursor?: CursorState) => void
+  /** Put the cursor at the start of a 1-based line, as a traceback names it. */
+  goToLine: (line: number) => void
   setTheme: (theme: ThemeName) => void
   setFontSize: (px: number) => void
   focus: () => void
@@ -83,7 +106,7 @@ export function createEditor(options: EditorOptions): EditorHandle {
     doc: options.content,
     selection: EditorSelection.single(cursor.anchor, cursor.head),
     extensions: [
-      baseExtensions(),
+      baseExtensions(options.onRun),
       themeCompartment.of(themeExtension(options.theme)),
       fontSizeCompartment.of(fontSizeExtension(options.fontSize)),
       EditorView.updateListener.of((update) => {
@@ -110,6 +133,20 @@ export function createEditor(options: EditorOptions): EditorHandle {
         selection: EditorSelection.single(next.anchor, next.head),
         scrollIntoView: true,
       })
+    },
+    /**
+     * Clamped to the document, because a traceback can name a line that is no
+     * longer there: the output panel survives an edit, so its references
+     * outlive the text they were produced from.
+     */
+    goToLine: (line) => {
+      const target = Math.min(Math.max(1, Math.floor(line)), view.state.doc.lines)
+      const info = view.state.doc.line(target)
+      view.dispatch({
+        selection: EditorSelection.cursor(info.from),
+        scrollIntoView: true,
+      })
+      view.focus()
     },
     setTheme: (theme) => {
       view.dispatch({ effects: themeCompartment.reconfigure(themeExtension(theme)) })

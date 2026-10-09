@@ -10,6 +10,7 @@
  * not exist, which is the `version: 'dev'` fallback in `parseBuildInfo`.
  */
 
+import type { RuntimeInfo } from './protocol.ts'
 import { SCHEMA_VERSION, type ThemeName } from './storage.ts'
 
 export const TAGLINE = 'A Python scratchpad that never leaves your browser tab.'
@@ -135,6 +136,7 @@ export function buildStack(deps: Record<string, string>, schema: number): StackR
       `Vitest${at(deps, 'vitest')}, ESLint${at(deps, 'eslint')} (typescript-eslint${at(deps, 'typescript-eslint')})`,
     ],
     ['Serving', 'nginx Alpine, read-only rootfs, strict CSP'],
+    ['Python', 'Pyodide (CPython compiled to WebAssembly) in a Web Worker, self-hosted'],
     ['Packaging', 'multi-arch Docker image (amd64/arm64), SBOM + provenance'],
   ]
 }
@@ -154,18 +156,27 @@ export interface RuntimeDiagnostics {
   autosavePaused: boolean
   theme: ThemeName
   online: boolean
+  /** Null until the first Run has finished fetching and starting Pyodide. */
+  runtime: RuntimeInfo | null
+  /**
+   * `crossOriginIsolated`. It decides whether Stop can interrupt rather than
+   * terminate, and whether `input()` can be answered while a program runs, so
+   * it is the first thing to know about a report of either misbehaving.
+   */
+  isolated: boolean
 }
 
 export interface DiagnosticsInputs extends RuntimeDiagnostics {
   version: string
   codemirror: string
   schema: number
+  pyodide: string
 }
 
 /**
  * One line to paste into a bug report, e.g.
- * `py-scratchpad v0.1.1 · CodeMirror 6.0.2 · schema v2 · storage localStorage ·
- * autosave active · theme dark · online`.
+ * `py-scratchpad v0.3.0 · CodeMirror 6.0.2 · schema v3 · storage localStorage ·
+ * autosave active · theme dark · online · python loaded · isolated yes`.
  *
  * It deliberately carries no buffer content and no filename: the whole point
  * of this app is that what you type never leaves the tab.
@@ -179,15 +190,34 @@ export function diagnosticsLine(inputs: DiagnosticsInputs): string {
     `autosave ${inputs.autosavePaused ? 'paused (other tab)' : 'active'}`,
     `theme ${inputs.theme}`,
     inputs.online ? 'online' : 'offline',
+    `python ${inputs.runtime === null ? 'not loaded' : 'loaded'}`,
+    `isolated ${inputs.isolated ? 'yes' : 'no'}`,
   ].join(' · ')
 }
 
+/**
+ * The About dialog's Runtime row. The Pyodide version is known at build time;
+ * CPython's exact patch level is only known once the runtime has started, and
+ * it does not start until the first Run — so before that the row says so
+ * rather than guessing it from the Pyodide version.
+ */
+export function runtimeLine(pyodide: string, runtime: RuntimeInfo | null): string {
+  const name = pyodide === '' ? 'Pyodide' : `Pyodide ${pyodide}`
+  if (runtime === null) return `${name} · CPython loads on the first Run`
+  return `${name} · CPython ${runtime.python}`
+}
+
+/** The pinned Pyodide version, or `''` under vitest where no define exists. */
+export const PYODIDE_VERSION =
+  typeof __PYODIDE_VERSION__ === 'string' ? __PYODIDE_VERSION__ : ''
+
 /** `diagnosticsLine` with this build's constants already filled in. */
-export function currentDiagnosticsLine(runtime: RuntimeDiagnostics): string {
+export function currentDiagnosticsLine(diagnostics: RuntimeDiagnostics): string {
   return diagnosticsLine({
-    ...runtime,
+    ...diagnostics,
     version: APP_VERSION,
     codemirror: BUILD.deps.codemirror ?? '',
     schema: SCHEMA_VERSION,
+    pyodide: PYODIDE_VERSION,
   })
 }

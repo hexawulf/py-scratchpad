@@ -47,14 +47,64 @@ Build it with Claude Code + VS Code in a new GitHub repo. Host it on **piapps2**
 - "Import" accepts several files at once.
 - Confirm before delete. Optionally keep one-level undo of the last deleted file.
 
-### v0.3 — Run in browser (Pyodide)
+### v0.3 — Run in browser (Pyodide) — **built 2026-10-09**, released as 0.3.0
+
+Built as planned, with the corrections below. v0.2 (multi-file) was **skipped for now**: a
+Run button is what the editor was wanted for, and the single buffer is what v0.3 runs.
+
 - A **Run** button (`Ctrl+Enter`) and an output panel below the editor that shows stdout, stderr and tracebacks.
 - Pyodide runs in a **Web Worker**, so an infinite loop never freezes the tab.
-- **Stop** terminates the worker and spawns a fresh one. This is simple and needs no special headers.
-- Pyodide is lazy-loaded on the first Run (about 10 MB, then cached), with a "Loading Python…" indicator.
-- **`input()` support:** worker plus `SharedArrayBuffer` plus `Atomics.wait`, so the worker blocks until the UI sends a line. This needs cross-origin isolation headers (§5). If that becomes a pain, drop back to "input() not supported" and note it in the UI.
-- "Clear output" button, plus a "Reset interpreter" button that clears globals between runs.
-- Optional: `micropip` / `loadPackage` for numpy and similar packages, on demand.
+- Pyodide is lazy-loaded on the first Run (about 13 MB, then cached), with a "Loading Python…" indicator.
+- "Clear" button, plus **Restart Python**, which recreates the worker.
+- **Correction 1 — Stop is two mechanisms, not one.** The plan said "terminate the worker and
+  spawn a fresh one … needs no special headers", and that is only the fallback. Terminating
+  costs a full 13 MB reload every time, which on an exercise you are iterating on is painful.
+  So Stop first writes SIGINT into Pyodide's **interrupt buffer** (one byte on a
+  `SharedArrayBuffer`), which raises `KeyboardInterrupt` and *keeps* the interpreter and
+  everything it imported; only if that has not taken within 500 ms — or there is no isolation
+  to give a `SharedArrayBuffer` — is the worker terminated. A thread parked on
+  `Atomics.wait` for `input()` never reaches a signal check, so Stop sends EOF first.
+- **Correction 2 — two modes were needed, not one.** The plan assumed one way of running the
+  buffer. An exercise file of bare arithmetic (`10 + 20 * 30`) prints **nothing** under
+  `python3 file.py`, which is not what a learner typing it expects. So there is a persisted
+  toggle: **REPL echo** (the default) compiles each top-level statement on its own with
+  `compile(ast.Interactive([stmt]), …, "single")`, so `sys.displayhook` prints a bare
+  expression's `repr` as the `>>>` prompt does; **Script** compiles the whole buffer with
+  `exec`. Compiling *everything* before running *anything* is what keeps a `SyntaxError` on
+  the last line from letting the lines above it print first.
+- **Correction 3 — "Reset interpreter … clears globals between runs" is the wrong default.**
+  Every Run already gets a fresh namespace, like `python3 file.py`, so a stale name can never
+  leak in. Restart Python is therefore about the *interpreter*, not the globals.
+- **Correction 4 — `input()`'s prompt comes out of stdout, and only with `isatty: false`.**
+  `pyodide.setStdin` hands the callback no prompt. With `isatty: true` CPython routes the
+  prompt to **stderr** through the readline path and it arrives *after* the stdin call; with
+  `isatty: false` it is written to **stdout** in its own write, *before* stdin is read — which
+  is what lets the page show it. The streams therefore use the `Writer` form
+  (`write(buffer)`) with `isatty: false`, not `batched`, because `batched` waits for a newline
+  that an `input()` prompt never has.
+- **Correction 5 — `TextEncoder.encodeInto` refuses a `SharedArrayBuffer`.** Chrome: *"The
+  provided Uint8Array value must not be shared."* The line is encoded into a fresh array and
+  copied across, cutting on a code-point boundary. This cost an hour; see `src/stdin.ts`.
+- **`input()` support** works as planned where the document is cross-origin isolated
+  (COOP + COEP, §5, plus a secure context). Where it is not — `http://192.168.50.120:5040` is
+  not a secure context — it does **not** drop back to "not supported": a **Program input** box
+  supplies the lines before the Run, fed to `input()` in order, with `EOFError` when they run
+  out, and a one-line note saying why.
+- **Dropped: `micropip` / `loadPackage`.** `connect-src 'self'` and the no-CDN rule mean no
+  package can be fetched, and vendoring numpy would multiply the image size. v0.3 is the
+  standard library and nothing else; `tkinter`, `turtle` and a missing third-party package
+  each get one explanatory line instead of a raw `ModuleNotFoundError`.
+- **Added: an output cap.** 1,000,000 characters or 10,000 lines, then
+  `--- output truncated ---`. `for i in range(10**9): print(i)` is a program a beginner
+  writes by accident, and without a ceiling it fills the worker, the message queue and the
+  DOM at once. Output is coalesced in the worker by size *and* elapsed time (the worker is
+  blocked inside synchronous Python, so no timer of its own can fire) and appended to the DOM
+  on an animation frame.
+- **Added: the runtime is staged, not vendored into git.** `build/pyodide.ts` copies the five
+  files the core runtime needs out of `node_modules/pyodide` into `dist/pyodide/<version>/`,
+  with Pyodide's MPL-2.0 licence beside them, and serves the same files out of `node_modules`
+  in dev. `public/pyodide/` in the plan's §4 layout is therefore **not** used — 13 MB of
+  binaries npm already pins exactly do not belong in the repository.
 
 ### Out of scope
 Accounts, sync, sharing links, a server-side Python runtime, LSP/autocomplete beyond CodeMirror's basics, tkinter/turtle (no GUI in WASM), and real filesystem or network access.
@@ -141,9 +191,17 @@ py-scratchpad/
   ```
 - **Container nginx headers** (`docker/nginx.conf`):
   - `Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`
-  - v0.3 with `input()`: `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. Verify that `self.crossOriginIsolated === true` in DevTools.
-  - Hashed assets (`/assets/*`, `/pyodide/*`): `Cache-Control: public, max-age=31536000, immutable`. `index.html`: `no-cache`.
-  - gzip on for js/css/wasm, plus `types { application/wasm wasm; }` if it is missing.
+  - **Done 2026-10-09 (v0.3).** COOP/COEP are in `docker/security-headers.conf`, which every
+    location includes. **A `types { application/wasm wasm; }` block at server level would be a
+    bug, not a fix:** nginx's `types` directive *replaces* the whole inherited table rather
+    than adding to it, so it would un-type every CSS and JS file in the image. The `.wasm`
+    instead gets its own regex location with an **empty** `types { }` (which disables
+    extension lookup there) plus `default_type application/wasm`.
+  - Hashed assets (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`.
+    `/pyodide/<version>/*` likewise — the version is in the path, so each URL is immutable.
+    `index.html`: `no-cache`.
+  - gzip covers js/css/wasm/json. The 9.6 MB `.wasm` gzips to 3.5 MB; serving five of those
+    concurrently under the 64 MB `mem_limit` measured 13.8 MiB.
 - **Verify on piapps2:**
   ```bash
   cd /home/zk/bots/py-scratchpad && docker compose up -d --build
@@ -302,6 +360,8 @@ Browser-only Python scratchpad served as static files. No backend, no accounts, 
 5. **Ingress + DNS** (approval gate): browse the public URL, and add the Kuma monitor. **v0.1 is done here.** — **done 2026-10-09** (§6, §7; for `python.piapps.dev` no cert and no DNS change were needed). The move to `py-scratchpad.com` followed the same day (§6.1) and *did* need a cert of its own.
 6. **v0.2 multi-file + zip export.**
 7. **v0.3 Pyodide:** worker runner, Stop, output panel; then the `input()` bridge with COOP/COEP.
+   — **done 2026-10-09**, all of it in one step (see §2 v0.3 for the five corrections). Step 6
+   (v0.2 multi-file) was skipped and is still open.
 
 Each step ends with a commit and a manual check in the browser.
 
@@ -315,7 +375,12 @@ Each step ends with a commit and a manual check in the browser.
 - [ ] The DevTools Network tab shows no requests to any host other than the one serving the page (`py-scratchpad.com`, or `python.piapps.dev`).
 - [ ] The DevTools console shows no CSP violations.
 - [ ] It works in Vivaldi/Opera/Chromium and Firefox on linuxsvr, and side by side with a Udemy tab (narrow window ≈ 600 px).
-- [ ] v0.3: `while True: pass` → Stop recovers within 1 s; `input("name? ")` works; tracebacks show line numbers.
+- [x] v0.3: `while True: pass` → Stop recovers within 1 s; `input("name? ")` works; tracebacks show line numbers.
+  — all three are in `tests/e2e/smoke.spec.ts`, which also pins the three-expression REPL-echo
+  case, a clicked traceback reference, `crossOriginIsolated === true`, the non-isolated
+  `Program input` fallback, and that no request leaves the origin.
+- [x] v0.3: two builds of one commit emit byte-identical `dist/assets/*.js` (the build date
+  comes from the source commit, not the clock).
 
 ---
 
@@ -328,3 +393,7 @@ Each step ends with a commit and a manual check in the browser.
 | v0.2 multi-file + zip | ~45 min |
 | v0.3 Pyodide worker + Stop | ~1 h |
 | v0.3 `input()` via SharedArrayBuffer + COOP/COEP | ~1 h |
+
+Actual for v0.3: about three hours, most of it on the two things the plan did not anticipate
+— that an exercise file of bare expressions needs a REPL-echo mode to be useful at all, and
+that `encodeInto` will not write into shared memory.

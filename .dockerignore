@@ -18,3 +18,8 @@ docs
 .idea
 *.log
 *.local
+
+# Playwright
+playwright.config.ts
+test-results
+playwright-report

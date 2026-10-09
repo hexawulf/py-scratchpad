@@ -11,6 +11,10 @@ tags: [homelab, docker, dockerhub, nginx, py-scratchpad, runbook]
 Static site, no backend and no server-side state. Everything the user types
 lives in their browser's `localStorage` under `py-scratchpad:v1`, so the
 container holds nothing worth backing up and can be replaced at any time.
+Since 0.3.0 the image also carries the **Pyodide runtime** under
+`/pyodide/<version>/` — 13 MB of WebAssembly that the browser fetches on the
+first Run. It is still static files: the Python runs in the user's tab, not
+here.
 
 The image is built by GitHub Actions on a pushed tag and published to Docker
 Hub. piapps2 **pulls a pinned tag** and never builds; it holds one file.
@@ -41,6 +45,30 @@ Run from linuxsvr, in `/home/zk/projects/python/py-scratchpad`.
 ```
 npm run lint && npm test && npm run build
 ```
+
+Then the browser smoke test, which runs against the `dist/` just built (it
+starts `npm run preview` itself):
+
+```
+npx playwright install chromium
+npm run test:e2e
+```
+
+`ci.yml` runs all four, so a green CI run is the same gate — but the e2e one is
+the only check that the worker actually starts under the real CSP and that the
+page is cross-origin isolated, so it is worth having locally before tagging.
+
+**1.1b Prove the build is reproducible.** The About dialog's build date comes
+from the last commit, not the clock, so two builds of one commit must be
+identical:
+
+```
+npm run build ; sha256sum dist/assets/*.js
+npm run build ; sha256sum dist/assets/*.js
+```
+
+Same hashes **and** same filenames. If they differ, something has started
+reading the build clock again — see `buildDate()` in `vite.config.ts`.
 
 **1.2 Bump the version.** Edit `version` in `package.json`. `release.yml`
 refuses to publish if the tag and `package.json` disagree, so these must match.
@@ -134,7 +162,9 @@ curl -s -o /dev/null -w 'status=%{http_code}\n' http://192.168.50.120:5040/does-
 Expected:
 
 - `/` → `200`, `Cache-Control: no-cache`, plus `Content-Security-Policy`,
-  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and — since
+  0.3.0 — `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`.
 - the title is `py-scratchpad` (Uptime Kuma matches on this keyword).
 - a path that does not exist → `404`, `Cache-Control: no-store`. There is no
   SPA fallback, so a `200` here means the config regressed.
@@ -149,6 +179,30 @@ Get the current hashed filename from the page itself:
 curl -s http://192.168.50.120:5040/ | grep -o '/assets/[^"]*\.js'
 ```
 
+**2.5b The Pyodide runtime (0.3.0 and later).** Three things have to be right
+or the first Run fails, and none of them is visible on `/`:
+
+```
+V=$(curl -s http://192.168.50.120:5040/assets/index-*.js 2>/dev/null | grep -o '/pyodide/[0-9.]*/' | head -n1)
+curl -sI "http://192.168.50.120:5040${V}pyodide.asm.wasm"
+curl -sI -H 'Accept-Encoding: gzip' "http://192.168.50.120:5040${V}pyodide.asm.wasm" | grep -i content-encoding
+for f in pyodide.mjs pyodide-lock.json pyodide.asm.mjs pyodide.asm.wasm python_stdlib.zip LICENSE ; do printf '%-20s ' "$f" ; curl -s -o /dev/null -w '%{http_code}\n' "http://192.168.50.120:5040${V}${f}" ; done
+```
+
+Expected:
+
+- the `.wasm` → `200`, **`Content-Type: application/wasm`** (anything else and
+  `WebAssembly.instantiateStreaming` refuses it) and
+  `Cache-Control: public, max-age=31536000, immutable`.
+- `Content-Encoding: gzip` on the second call — 9.6 MB becomes about 3.5 MB.
+- all six files → `200`. Five are the runtime; `LICENSE` is Pyodide's MPL-2.0,
+  which has to travel with them.
+
+The version in `$V` must match `pyodide` in `package.json` for the release
+being deployed. The path is immutable by construction, so a version bump
+changes the path rather than the contents of one — no cache anywhere needs
+purging, and the old path simply stops being requested.
+
 **2.6 After a release that changes headers or caching,** re-check through the
 public vhost too, since piapps nginx must pass the container's headers through
 without adding its own:
@@ -159,6 +213,32 @@ Both public hostnames, since each is a separate vhost:
 curl -sI https://py-scratchpad.com/
 curl -sI https://python.piapps.dev/
 ```
+
+**2.6b COOP/COEP must arrive exactly once, and isolation must actually be on.**
+A duplicate `Cross-Origin-Embedder-Policy` is as broken as a missing one, and
+presence in the headers is not proof that the browser agreed — so count them,
+then ask a browser:
+
+```
+for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do H=$(curl -sI "$u") ; printf '%s\n' "$u" ; for h in cross-origin-opener-policy cross-origin-embedder-policy ; do printf '  %-32s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done ; done
+```
+
+Both counts must be `1` on both hostnames.
+
+Headers being present is not proof that the browser agreed to isolate the
+document, so ask one. `playwright.config.ts` starts its own preview server and
+cannot be pointed at production, so this is a one-off, run from the repo on
+linuxsvr (Chromium comes from `npx playwright install chromium`):
+
+```
+cd /home/zk/projects/python/py-scratchpad
+node --input-type=module -e 'import {chromium} from "playwright"; const b = await chromium.launch(); const p = await b.newPage(); for (const u of ["https://py-scratchpad.com/", "https://python.piapps.dev/"]) { await p.goto(u); console.log(u, "crossOriginIsolated =", await p.evaluate(() => window.crossOriginIsolated)); } await b.close()'
+```
+
+Both must print `crossOriginIsolated = true`. That is the only thing that
+proves Stop's interrupt and interactive `input()` will work. `false` means a
+header was dropped, duplicated or rewritten between the container and the
+browser — **widen nothing in the CSP to compensate**; find the header.
 
 ---
 
@@ -249,7 +329,9 @@ that `linuxsvr.org` uses).
 
 **No `add_header` belongs in either vhost.** The container owns the security headers
 (`docker/security-headers.conf`) and nothing on piapps adds headers at http level, in `conf.d/`
-or in `snippets/`. An `add_header` here would make each one appear **twice** on the public URL.
+or in `snippets/`. An `add_header` here would make each one appear **twice** on the public URL
+— and for `Cross-Origin-Embedder-Policy` (new in 0.3.0) a duplicate does not merely look
+untidy: the browser refuses to isolate the document, and `SharedArrayBuffer` disappears.
 `cloudflare_real_ip.conf` is likewise already loaded at http level — do not include it per-vhost.
 
 ### 6.1 The two certificates are not interchangeable
@@ -377,9 +459,12 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   echo | openssl s_client -connect 192.168.50.102:443 -servername py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
   echo | openssl s_client -connect 192.168.50.102:443 -servername www.py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
   ```
-- **Each security header must appear exactly once.** Count them, don't eyeball presence:
+- **Each security header must appear exactly once.** Count them, don't eyeball presence.
+  The two cross-origin ones are in the list since 0.3.0: a duplicated
+  `Cross-Origin-Embedder-Policy` breaks isolation exactly as a missing one does, and with it
+  Stop's interrupt and interactive `input()`.
   ```
-  H=$(curl -sI https://py-scratchpad.com/) ; for h in content-security-policy x-content-type-options referrer-policy cache-control ; do printf '%-28s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done
+  H=$(curl -sI https://py-scratchpad.com/) ; for h in content-security-policy x-content-type-options referrer-policy cache-control cross-origin-opener-policy cross-origin-embedder-policy ; do printf '%-32s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done
   ```
 - **Prove Cloudflare is not rewriting the page.** The `piapps.dev` zone has Web Analytics with
   `auto_install: true`, which *could* inject `static.cloudflareinsights.com/beacon.min.js` — that
@@ -419,6 +504,21 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   (`NODE_VERSION=22.23.3`, `ALPINE_VERSION=3.24`, `NGINX_VERSION=1.30.5`).
   Bumping them is a deliberate commit, not something a rebuild does on its own.
   `package.json`'s `engines.node` keeps CI on the same Node major as the image.
+- **The build date comes from the source, not the clock.** `vite.config.ts`
+  reads `SOURCE_DATE_EPOCH` first, then `git log -1 --format=%cI`. The image has
+  no `.git` (`.dockerignore` excludes it), so `release.yml` passes the tagged
+  commit's committer date as a `SOURCE_DATE_EPOCH` build arg. A plain local
+  `docker build` without that arg produces a working image whose About dialog
+  shows the version with **no month** — correct, not broken.
+- **The Pyodide runtime is not in git.** `build/pyodide.ts` copies five files
+  out of `node_modules/pyodide` into `dist/pyodide/<version>/` during
+  `vite build`, plus `vendor/pyodide/LICENSE`. So the runtime version is
+  whatever `package-lock.json` pins, and `npm ci` inside the Docker build is
+  what fetches it. Bumping it is a `package.json` edit, a lock-file update and
+  a new `/pyodide/<version>/` path — nothing on piapps2 or piapps changes.
+- **`mem_limit: 64m` still holds.** nginx gzipping the 9.6 MB `.wasm` measured
+  13.8 MiB with five concurrent fetches. The limit does not need raising for
+  0.3.0.
 - **The watchtower opt-out label must stay.** The tag is pinned on purpose;
   watchtower would otherwise move the container off the version this file names.
   (piapps2's watchtower runs with `WATCHTOWER_LABEL_ENABLE=true`, i.e. opt-in,

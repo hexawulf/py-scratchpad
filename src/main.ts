@@ -24,10 +24,18 @@ import {
 } from './storage.ts'
 import {
   CONFLICT_NOTICE,
+  isTransient,
+  MOVE_NOTICE,
+  MOVE_NOTICE_DISMISSED_KEY,
   type NoticeState,
   type NoticeTone,
   RELOADED_NOTICE,
+  shouldShowMoveNotice,
 } from './notice.ts'
+import { linkifyOutput } from './output.ts'
+import type { OutputStream, RunMode, RunStatus, RuntimeInfo } from './protocol.ts'
+import { createRunner, isCrossOriginIsolated, type RunnerPhase } from './runner.ts'
+import { splitInputLines } from './stdin.ts'
 import { decideOnExternalWrite, shouldWarnBeforeUnload } from './tabsync.ts'
 
 /** Debounce for autosave. Short enough that a crash loses a keystroke, not a line. */
@@ -50,6 +58,15 @@ root.innerHTML = `
         <button type="button" id="download" title="Download (Ctrl+S)">Download</button>
       </span>
       <input type="file" id="file-input" accept=".py,.txt,text/x-python,text/plain" hidden />
+      <span class="group" role="group" aria-label="Run">
+        <button type="button" id="run" class="run-button" title="Run (Ctrl+Enter)">Run</button>
+        <button type="button" id="stop" title="Stop the running program" disabled>Stop</button>
+      </span>
+      <select id="run-mode" class="run-mode" aria-label="Run mode"
+              title="REPL echo prints the value of a bare expression, as the >>> prompt does. Script runs the buffer like python3 file.py.">
+        <option value="repl">REPL echo</option>
+        <option value="script">Script</option>
+      </select>
       <span class="toolbar-spacer"></span>
       <span class="group" role="group" aria-label="Font size">
         <button type="button" id="font-smaller" title="Smaller text">A&minus;</button>
@@ -65,13 +82,45 @@ root.innerHTML = `
         </svg>
       </button>
     </header>
+    <details id="program-input" class="program-input" hidden>
+      <summary>Program input</summary>
+      <textarea id="program-input-text" class="program-input-text" rows="3" spellcheck="false"
+                autocomplete="off" aria-describedby="program-input-note"
+                placeholder="One line per input() call"></textarea>
+      <p id="program-input-note" class="program-input-note"></p>
+    </details>
     <div id="editor" class="editor"></div>
+    <section id="output" class="output" hidden aria-label="Program output">
+      <header class="output-head">
+        <span class="output-title">Output</span>
+        <span id="output-status" class="output-status" role="status" aria-live="polite"></span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" id="restart-python"
+                title="Throw the interpreter away and start a fresh one">Restart Python</button>
+        <button type="button" id="output-clear">Clear</button>
+      </header>
+      <div id="output-log" class="output-log" tabindex="0"></div>
+      <form id="stdin-form" class="stdin" hidden>
+        <label id="stdin-prompt" class="stdin-prompt" for="stdin-input"></label>
+        <input type="text" id="stdin-input" class="stdin-input" autocomplete="off"
+               spellcheck="false" autocapitalize="off" aria-label="Program input line" />
+        <button type="submit">Enter</button>
+      </form>
+    </section>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden>
       <span id="notice-text" class="notice-text"></span>
+      <a id="notice-link" class="notice-link" target="_blank" rel="noopener noreferrer" hidden></a>
       <span id="notice-actions" class="notice-actions" hidden>
         <button type="button" id="notice-reload">Reload</button>
         <button type="button" id="notice-keep">Keep mine</button>
       </span>
+      <button type="button" id="notice-dismiss" class="notice-dismiss icon-button"
+              aria-label="Dismiss this notice" title="Dismiss" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 6l12 12" />
+          <path d="M18 6L6 18" />
+        </svg>
+      </button>
     </div>
   </div>
 `
@@ -86,6 +135,8 @@ const editorHost = must<HTMLDivElement>('#editor')
 const noticeEl = must<HTMLDivElement>('#notice')
 const noticeTextEl = must<HTMLSpanElement>('#notice-text')
 const noticeActionsEl = must<HTMLSpanElement>('#notice-actions')
+const noticeLinkEl = must<HTMLAnchorElement>('#notice-link')
+const noticeDismissButton = must<HTMLButtonElement>('#notice-dismiss')
 const reloadButton = must<HTMLButtonElement>('#notice-reload')
 const keepButton = must<HTMLButtonElement>('#notice-keep')
 const filenameInput = must<HTMLInputElement>('#filename')
@@ -96,6 +147,20 @@ const themeButton = must<HTMLButtonElement>('#theme-toggle')
 const smallerButton = must<HTMLButtonElement>('#font-smaller')
 const largerButton = must<HTMLButtonElement>('#font-larger')
 const aboutButton = must<HTMLButtonElement>('#about-open')
+const runButton = must<HTMLButtonElement>('#run')
+const stopButton = must<HTMLButtonElement>('#stop')
+const runModeSelect = must<HTMLSelectElement>('#run-mode')
+const outputPanel = must<HTMLElement>('#output')
+const outputStatusEl = must<HTMLSpanElement>('#output-status')
+const outputLogEl = must<HTMLDivElement>('#output-log')
+const clearOutputButton = must<HTMLButtonElement>('#output-clear')
+const restartButton = must<HTMLButtonElement>('#restart-python')
+const stdinForm = must<HTMLFormElement>('#stdin-form')
+const stdinPromptEl = must<HTMLLabelElement>('#stdin-prompt')
+const stdinInput = must<HTMLInputElement>('#stdin-input')
+const programInput = must<HTMLDetailsElement>('#program-input')
+const programInputText = must<HTMLTextAreaElement>('#program-input-text')
+const programInputNote = must<HTMLParagraphElement>('#program-input-note')
 
 /**
  * `window.localStorage` itself throws when site data is blocked, so even
@@ -129,6 +194,7 @@ const loaded = load(storage, { defaultTheme: preferredTheme() })
 let theme: ThemeName = loaded.state.settings.theme
 let fontSize = clampFontSize(loaded.state.settings.fontSize)
 let bufferName = loaded.state.buffer.name
+let runMode: RunMode = loaded.state.settings.runMode
 let fileMeta: FileMeta = {
   lineEnding: loaded.state.buffer.lineEnding,
   bom: loaded.state.buffer.bom,
@@ -137,26 +203,41 @@ let fileMeta: FileMeta = {
 let noticeTimer: number | undefined
 let saveFailed = false
 
-function showNotice(message: string, tone: NoticeTone, withActions = false): void {
-  noticeTextEl.textContent = message
-  noticeActionsEl.hidden = !withActions
-  noticeEl.classList.toggle('notice-error', tone === 'error')
+/** Show one of the fixed notices from notice.ts: message, link and actions together. */
+function showNoticeState(state: NoticeState): void {
+  noticeTextEl.textContent = state.message
+  noticeActionsEl.hidden = !state.actions
+
+  if (state.link === undefined) {
+    noticeLinkEl.hidden = true
+    noticeLinkEl.removeAttribute('href')
+    noticeLinkEl.textContent = ''
+  } else {
+    noticeLinkEl.href = state.link.href
+    noticeLinkEl.textContent = state.link.label
+    noticeLinkEl.hidden = false
+  }
+
+  noticeDismissButton.hidden = state.dismissible !== true
+  noticeEl.classList.toggle('notice-error', state.tone === 'error')
   noticeEl.hidden = false
   if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
   // Errors and prompts stay up: they are waiting for the user, not reporting.
-  noticeTimer =
-    tone === 'info' && !withActions ? window.setTimeout(hideNotice, NOTICE_TIMEOUT_MS) : undefined
+  noticeTimer = isTransient(state) ? window.setTimeout(hideNotice, NOTICE_TIMEOUT_MS) : undefined
 }
 
-/** Show one of the fixed notices from notice.ts, message and actions together. */
-function showNoticeState(state: NoticeState): void {
-  showNotice(state.message, state.tone, state.actions)
+function showNotice(message: string, tone: NoticeTone, withActions = false): void {
+  showNoticeState({ message, tone, actions: withActions })
 }
 
 function hideNotice(): void {
   noticeEl.hidden = true
   noticeTextEl.textContent = ''
   noticeActionsEl.hidden = true
+  noticeLinkEl.hidden = true
+  noticeLinkEl.removeAttribute('href')
+  noticeLinkEl.textContent = ''
+  noticeDismissButton.hidden = true
   noticeEl.classList.remove('notice-error')
 }
 
@@ -176,9 +257,14 @@ function applyFilename(): void {
   filenameInput.value = bufferName
 }
 
+function applyRunMode(): void {
+  runModeSelect.value = runMode
+}
+
 applyTheme()
 applyFontSize()
 applyFilename()
+applyRunMode()
 
 const editor: EditorHandle = createEditor({
   parent: editorHost,
@@ -187,6 +273,9 @@ const editor: EditorHandle = createEditor({
   theme,
   fontSize,
   onChange: scheduleSave,
+  onRun: () => {
+    startRun()
+  },
 })
 
 let saveTimer: number | undefined
@@ -216,7 +305,7 @@ function currentState(): ScratchpadState {
       lineEnding: fileMeta.lineEnding,
       bom: fileMeta.bom,
     },
-    settings: { theme, fontSize },
+    settings: { theme, fontSize, runMode },
   }
 }
 
@@ -332,9 +421,11 @@ function reloadFromStorage(): void {
   fileMeta = { lineEnding: result.state.buffer.lineEnding, bom: result.state.buffer.bom }
   theme = result.state.settings.theme
   fontSize = clampFontSize(result.state.settings.fontSize)
+  runMode = result.state.settings.runMode
   applyFilename()
   applyTheme()
   applyFontSize()
+  applyRunMode()
   editor.setTheme(theme)
   editor.setFontSize(fontSize)
 
@@ -361,6 +452,36 @@ function keepMine(): void {
 
 reloadButton.addEventListener('click', reloadFromStorage)
 keepButton.addEventListener('click', keepMine)
+
+// ---------------------------------------------------------------------------
+// The move notice
+// ---------------------------------------------------------------------------
+
+/**
+ * `window.sessionStorage` throws outright when site data is blocked, exactly
+ * as `localStorage` does, so both the read and the write are guarded. A
+ * browser that cannot remember the dismissal simply shows the notice again.
+ */
+function readSessionFlag(key: string): string | null {
+  try {
+    return window.sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeSessionFlag(key: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(key, value)
+  } catch {
+    // Nothing to do: the notice comes back, which is the harmless direction.
+  }
+}
+
+noticeDismissButton.addEventListener('click', () => {
+  writeSessionFlag(MOVE_NOTICE_DISMISSED_KEY, '1')
+  hideNotice()
+})
 
 // ---------------------------------------------------------------------------
 // Filename
@@ -548,6 +669,252 @@ largerButton.addEventListener('click', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Run
+// ---------------------------------------------------------------------------
+
+runModeSelect.addEventListener('change', () => {
+  runMode = runModeSelect.value === 'script' ? 'script' : 'repl'
+  applyRunMode()
+  scheduleSave()
+})
+
+/**
+ * Output is appended on an animation frame rather than per message: a `print`
+ * loop produces thousands of small writes, and one DOM insertion each is what
+ * makes the panel, rather than the interpreter, the slow part.
+ */
+let outputPending: { stream: OutputStream; text: string }[] = []
+let outputFrame: number | undefined
+
+/** Within this many pixels of the bottom counts as "following the output". */
+const FOLLOW_SLACK_PX = 24
+
+function logIsAtBottom(): boolean {
+  const { scrollTop, scrollHeight, clientHeight } = outputLogEl
+  return scrollHeight - scrollTop - clientHeight <= FOLLOW_SLACK_PX
+}
+
+/**
+ * One chunk as DOM nodes. `File "<buffer>", line N` becomes a button, so a
+ * traceback is navigable; everything else stays text, because output is the
+ * program's and must never be interpreted as markup.
+ */
+function renderChunk(stream: OutputStream, text: string): Node[] {
+  const nodes: Node[] = []
+
+  for (const segment of linkifyOutput(text, bufferName)) {
+    if (segment.line === undefined) {
+      const span = document.createElement('span')
+      span.className = `out-${stream}`
+      span.textContent = segment.text
+      nodes.push(span)
+      continue
+    }
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = `out-${stream} out-ref`
+    button.textContent = segment.text
+    button.dataset.line = String(segment.line)
+    button.title = `Go to line ${String(segment.line)}`
+    nodes.push(button)
+  }
+
+  return nodes
+}
+
+/**
+ * Append everything queued. Called on an animation frame, and directly
+ * whenever the UI is about to say something about the run — a status of
+ * "Done in 207 ms", or an input() prompt — because either would otherwise be
+ * on screen for a frame while the output it refers to was still queued.
+ */
+function flushOutputToDom(): void {
+  if (outputFrame !== undefined) {
+    window.cancelAnimationFrame(outputFrame)
+    outputFrame = undefined
+  }
+
+  const batch = outputPending
+  outputPending = []
+  if (batch.length === 0) return
+
+  const follow = logIsAtBottom()
+  const fragment = document.createDocumentFragment()
+  for (const chunk of batch) fragment.append(...renderChunk(chunk.stream, chunk.text))
+  outputLogEl.append(fragment)
+  if (follow) outputLogEl.scrollTop = outputLogEl.scrollHeight
+}
+
+function appendOutput(stream: OutputStream, text: string): void {
+  if (text === '') return
+  outputPending.push({ stream, text })
+  outputFrame ??= window.requestAnimationFrame(flushOutputToDom)
+}
+
+function clearOutput(): void {
+  outputPending = []
+  if (outputFrame !== undefined) {
+    window.cancelAnimationFrame(outputFrame)
+    outputFrame = undefined
+  }
+  outputLogEl.replaceChildren()
+}
+
+function setRunStatus(message: string): void {
+  outputStatusEl.textContent = message
+}
+
+outputLogEl.addEventListener('click', (event) => {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+  const line = target.closest<HTMLElement>('.out-ref')?.dataset.line
+  if (line === undefined) return
+  editor.goToLine(Number(line))
+})
+
+// ---------------------------------------------------------------------------
+// The worker
+// ---------------------------------------------------------------------------
+
+/** Set once Pyodide has reported its versions; the About dialog reads it. */
+let runtimeInfo: RuntimeInfo | null = null
+
+function endStdinPrompt(): void {
+  stdinForm.hidden = true
+  stdinPromptEl.textContent = ''
+  stdinInput.value = ''
+}
+
+const STATUS_FOR_PHASE: Partial<Record<RunnerPhase, string>> = {
+  loading: 'Loading Python…',
+  running: 'Running…',
+  input: 'Waiting for input…',
+}
+
+function applyPhase(phase: RunnerPhase): void {
+  const busy = phase === 'running' || phase === 'input'
+  runButton.disabled = busy
+  stopButton.disabled = !busy && phase !== 'loading'
+  runButton.classList.toggle('is-busy', busy || phase === 'loading')
+
+  if (phase !== 'input') endStdinPrompt()
+  const status = STATUS_FOR_PHASE[phase]
+  if (status !== undefined) setRunStatus(status)
+}
+
+const runner = createRunner({
+  indexUrl: typeof __PYODIDE_INDEX_URL__ === 'string' ? __PYODIDE_INDEX_URL__ : '/pyodide/',
+  onPhase: applyPhase,
+  onOutput: appendOutput,
+
+  onReady: (info) => {
+    runtimeInfo = info
+  },
+
+  onError: (message) => {
+    setRunStatus('Python failed to load')
+    appendOutput('err', `${message}\n`)
+    showNotice(`Python could not be loaded: ${message}`, 'error')
+  },
+
+  onStdinPrompt: (prompt) => {
+    // The prompt is the tail of output already sent; paint that first.
+    flushOutputToDom()
+    stdinPromptEl.textContent = prompt === '' ? 'Input:' : prompt
+    stdinForm.hidden = false
+    stdinInput.value = ''
+    stdinInput.focus()
+  },
+
+  onDone: (status, ms) => {
+    flushOutputToDom()
+    setRunStatus(doneMessage(status, ms))
+  },
+})
+
+function doneMessage(status: RunStatus, ms: number): string {
+  const took = ms < 1000 ? `${String(Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`
+  if (status === 'interrupt') return `Stopped after ${took}`
+  if (status === 'error') return `Finished with an error in ${took}`
+  if (status === 'exit') return `Exited after ${took}`
+  return `Done in ${took}`
+}
+
+/**
+ * `input()` cannot be answered mid-run without `SharedArrayBuffer`, which
+ * needs cross-origin isolation — true on https://py-scratchpad.com, false on
+ * the plain-HTTP LAN endpoint, which is not a secure context. There the lines
+ * are supplied before the Run instead, and the box says why.
+ */
+if (!runner.supportsInteractiveInput) {
+  programInput.hidden = false
+  programInputNote.textContent =
+    'This page is not cross-origin isolated (it needs HTTPS, or localhost), so a program cannot ' +
+    'stop and ask while it runs. Lines typed here are fed to input() in order; when they run out, ' +
+    'input() raises EOFError.'
+}
+
+function startRun(): void {
+  if (runner.phase === 'running' || runner.phase === 'input') return
+
+  outputPanel.hidden = false
+  clearOutput()
+  endStdinPrompt()
+  setRunStatus(runner.phase === 'ready' ? 'Running…' : 'Loading Python…')
+
+  runner.run({
+    source: editor.getContent(),
+    filename: bufferName,
+    mode: runMode,
+    inputLines: runner.supportsInteractiveInput ? [] : splitInputLines(programInputText.value),
+  })
+}
+
+runButton.addEventListener('click', startRun)
+
+stopButton.addEventListener('click', () => {
+  runner.stop()
+  setRunStatus('Stopping…')
+})
+
+clearOutputButton.addEventListener('click', () => {
+  clearOutput()
+  setRunStatus('')
+  editor.focus()
+})
+
+restartButton.addEventListener('click', () => {
+  runner.restart()
+  appendOutput('err', 'Python restarted — every name from the last run is gone.\n')
+  setRunStatus('Loading Python…')
+})
+
+stdinForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  if (runner.phase !== 'input') return
+
+  const line = stdinInput.value
+  // Echo it, the way a terminal shows what was typed at a prompt.
+  appendOutput('in', `${line}\n`)
+  // The field is cleared and hidden by applyPhase, which runs when sendInput
+  // moves the phase back to 'running'. Leaving it to that means a send that
+  // does not take leaves the prompt on screen rather than a dead end.
+  runner.sendInput(line)
+})
+
+// Ctrl+Enter also works when the focus is outside the editor; inside it, the
+// editor's own high-precedence keymap handles it (see editor.ts).
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.altKey || event.shiftKey) return
+  if (!event.ctrlKey && !event.metaKey) return
+  // Not while typing an answer to input(): there, Enter already means "send".
+  if (event.target === stdinInput) return
+  event.preventDefault()
+  startRun()
+})
+
+// ---------------------------------------------------------------------------
 // About
 // ---------------------------------------------------------------------------
 
@@ -557,10 +924,19 @@ function aboutDiagnostics(): RuntimeDiagnostics {
     autosavePaused: conflictPending,
     theme,
     online: window.navigator.onLine,
+    runtime: runtimeInfo,
+    isolated: isCrossOriginIsolated(),
   }
 }
 
 createAboutDialog({ opener: aboutButton, diagnostics: aboutDiagnostics })
+
+// Last, so a real problem with this tab's storage outranks the move notice.
+// Any later notice replaces the move one; it returns on the next load of the
+// old hostname unless it was dismissed.
+if (shouldShowMoveNotice(window.location.hostname, readSessionFlag(MOVE_NOTICE_DISMISSED_KEY))) {
+  showNoticeState(MOVE_NOTICE)
+}
 
 if (!storageAvailable) {
   showNotice('This browser is blocking site data, so nothing will be saved on reload.', 'error')

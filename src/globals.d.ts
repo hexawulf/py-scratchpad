@@ -6,3 +6,9 @@
 
 /** `BuildInfo` as a JSON string: version, ISO build date, dependency versions. */
 declare const __BUILD_INFO__: string
+
+/** The exact Pyodide version staged into `dist/pyodide/<version>/`. */
+declare const __PYODIDE_VERSION__: string
+
+/** `/pyodide/<version>/` — what the worker passes as `indexURL`. */
+declare const __PYODIDE_INDEX_URL__: string

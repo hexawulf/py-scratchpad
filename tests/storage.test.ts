@@ -5,6 +5,7 @@ import {
   clampCursor,
   clampFontSize,
   DEFAULT_FONT_SIZE,
+  DEFAULT_RUN_MODE,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   load,
@@ -45,7 +46,7 @@ function stateWith(content: string, anchor = 0, head = anchor): ScratchpadState 
       lineEnding: '\n',
       bom: false,
     },
-    settings: { theme: 'dark', fontSize: DEFAULT_FONT_SIZE },
+    settings: { theme: 'dark', fontSize: DEFAULT_FONT_SIZE, runMode: 'repl' },
   }
 }
 
@@ -66,7 +67,7 @@ describe('load defaults', () => {
         lineEnding: '\n',
         bom: false,
       },
-      settings: { theme: 'dark', fontSize: DEFAULT_FONT_SIZE },
+      settings: { theme: 'dark', fontSize: DEFAULT_FONT_SIZE, runMode: DEFAULT_RUN_MODE },
     })
   })
 
@@ -74,7 +75,7 @@ describe('load defaults', () => {
     const storage = new MemoryStorage()
     expect(load(storage, { defaultTheme: 'light' }).state.settings.theme).toBe('light')
 
-    save(storage, { ...stateWith(''), settings: { theme: 'dark', fontSize: 18 } })
+    save(storage, { ...stateWith(''), settings: { theme: 'dark', fontSize: 18, runMode: 'repl' } })
     expect(load(storage, { defaultTheme: 'light' }).state.settings.theme).toBe('dark')
   })
 
@@ -103,7 +104,7 @@ describe('save and load round-trip', () => {
     const storage = new MemoryStorage()
     const content = 'def f():\n\treturn "héllo — 日本語 🐍"\n\n# tail\n'
     const original = stateWith(content, 12, 30)
-    original.settings = { theme: 'light', fontSize: 22 }
+    original.settings = { theme: 'light', fontSize: 22, runMode: 'script' }
     original.buffer.name = 'notes.py'
 
     const written = save(storage, original)
@@ -152,7 +153,11 @@ describe('save and load round-trip', () => {
       lineEnding: '\n',
       bom: false,
     })
-    expect(state.settings).toEqual({ theme: 'dark', fontSize: DEFAULT_FONT_SIZE })
+    expect(state.settings).toEqual({
+      theme: 'dark',
+      fontSize: DEFAULT_FONT_SIZE,
+      runMode: DEFAULT_RUN_MODE,
+    })
   })
 
   it('repairs a nonsense lineEnding instead of writing it back to a file', () => {
@@ -181,7 +186,7 @@ describe('schema v1 migration', () => {
     settings: { theme: 'light', fontSize: 20 },
   })
 
-  it('loads v1 data unchanged, filling in the v2 defaults', () => {
+  it('loads v1 data unchanged, filling in the v2 and v3 defaults', () => {
     const storage = new MemoryStorage()
     storage.items.set(STORAGE_KEY, V1_PAYLOAD)
 
@@ -197,7 +202,7 @@ describe('schema v1 migration', () => {
         lineEnding: '\n',
         bom: false,
       },
-      settings: { theme: 'light', fontSize: 20 },
+      settings: { theme: 'light', fontSize: 20, runMode: DEFAULT_RUN_MODE },
     })
   })
 
@@ -211,7 +216,7 @@ describe('schema v1 migration', () => {
     expect(storage.items.get(STORAGE_KEY)).toBe(V1_PAYLOAD)
   })
 
-  it('writes v2 back the next time the buffer is saved', () => {
+  it('writes the current schema back the next time the buffer is saved', () => {
     const storage = new MemoryStorage()
     storage.items.set(STORAGE_KEY, V1_PAYLOAD)
 
@@ -219,7 +224,11 @@ describe('schema v1 migration', () => {
     save(storage, state)
 
     const stored: unknown = JSON.parse(storage.items.get(STORAGE_KEY) ?? 'null')
-    expect(stored).toMatchObject({ version: 2, buffer: { lineEnding: '\n', bom: false } })
+    expect(stored).toMatchObject({
+      version: SCHEMA_VERSION,
+      buffer: { lineEnding: '\n', bom: false },
+      settings: { runMode: DEFAULT_RUN_MODE },
+    })
   })
 
   it('repairs a v1 payload with a broken buffer the same way v2 is repaired', () => {
@@ -285,8 +294,8 @@ describe('corrupt or unknown payloads', () => {
 
   it('treats a newer schema version as corrupt rather than guessing', () => {
     const storage = new MemoryStorage()
-    // v3 is the planned multi-file schema; this build must not invent a reading.
-    const raw = JSON.stringify({ version: 3, files: [{ name: 'a.py', content: 'later' }] })
+    // v4 is the planned multi-file schema; this build must not invent a reading.
+    const raw = JSON.stringify({ version: 4, files: [{ name: 'a.py', content: 'later' }] })
     storage.items.set(STORAGE_KEY, raw)
 
     const { raw: loadedRaw, problem } = load(storage, { now: FIXED_NOW })

@@ -22,3 +22,13 @@ pnpm-debug.log*
 .DS_Store
 *.local
 *.sw?
+
+# Pyodide runtime, copied from node_modules at build time (build/pyodide.ts).
+# Never committed: 13 MB of binaries that npm already pins exactly.
+public/pyodide/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

@@ -98,7 +98,7 @@ describe.each(FIXTURES)('round-trip $name', ({ name, lineEnding, bom }) => {
           lineEnding: decoded.file.lineEnding,
           bom: decoded.file.bom,
         },
-        settings: { theme: 'dark', fontSize: 14 },
+        settings: { theme: 'dark', fontSize: 14, runMode: 'repl' },
       }).ok,
     ).toBe(true)
 

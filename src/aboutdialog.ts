@@ -15,7 +15,9 @@ import {
   CONTACT,
   currentDiagnosticsLine,
   LINKS,
+  PYODIDE_VERSION,
   type RuntimeDiagnostics,
+  runtimeLine,
   STACK,
   TAGLINE,
   versionLine,
@@ -70,6 +72,8 @@ export function createAboutDialog(options: AboutDialogOptions): void {
         <button type="button" class="about-close" aria-label="Close">&#10005;</button>
       </header>
       <p class="about-version"></p>
+      <h3>Runtime</h3>
+      <p class="about-runtime"></p>
       <h3>Tech stack</h3>
       <dl class="about-stack"></dl>
       <h3>Contact</h3>
@@ -89,6 +93,7 @@ export function createAboutDialog(options: AboutDialogOptions): void {
   const copyButton = pick<HTMLButtonElement>(dialog, '.about-copy')
   const taglineEl = pick<HTMLParagraphElement>(dialog, '.about-tagline')
   const versionEl = pick<HTMLParagraphElement>(dialog, '.about-version')
+  const runtimeEl = pick<HTMLParagraphElement>(dialog, '.about-runtime')
   const stackEl = pick<HTMLDListElement>(dialog, '.about-stack')
   const contactEl = pick<HTMLParagraphElement>(dialog, '.about-contact')
   const linksEl = pick<HTMLUListElement>(dialog, '.about-links')
@@ -192,7 +197,11 @@ export function createAboutDialog(options: AboutDialogOptions): void {
   })
 
   options.opener.addEventListener('click', () => {
-    diagEl.textContent = currentDiagnosticsLine(options.diagnostics())
+    const diagnostics = options.diagnostics()
+    // Read on every open, not once at startup: Pyodide only reports CPython's
+    // version after the first Run, so this row changes while the page is open.
+    runtimeEl.textContent = runtimeLine(PYODIDE_VERSION, diagnostics.runtime)
+    diagEl.textContent = currentDiagnosticsLine(diagnostics)
     clearFeedback()
     dialog.showModal()
     closeButton.focus()

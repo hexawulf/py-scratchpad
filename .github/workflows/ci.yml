@@ -50,3 +50,26 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The browser is pinned by @playwright/test's exact version in
+      # package.json, so this downloads the same build every run. Only
+      # chromium: a second 13 MB WebAssembly download per browser buys little
+      # for a smoke test.
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      # Runs against `npm run preview`, i.e. the dist/ built above — including
+      # the COOP/COEP headers that make the page cross-origin isolated, which
+      # is what the input() and Stop tests depend on.
+      - name: Browser smoke test
+        run: npm run test:e2e
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

@@ -15,6 +15,13 @@ ARG NGINX_VERSION=1.30.5
 # $BUILDPLATFORM-pinned: dist/ is byte-identical on every arch, so the bundle is
 # built once natively instead of a second time under QEMU emulation.
 FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS build
+# The About dialog's build date comes from the source's own timestamp, never
+# from the build clock (see vite.config.ts). .dockerignore excludes .git, so
+# `git log` cannot be the source here: release.yml passes the tagged commit's
+# committer date as SOURCE_DATE_EPOCH. Left empty — as a plain local
+# `docker build` does — the dialog shows the version with no month.
+ARG SOURCE_DATE_EPOCH=
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 WORKDIR /app
 # Copy the manifests first so the npm layer is cached while sources change.
 COPY package.json package-lock.json ./

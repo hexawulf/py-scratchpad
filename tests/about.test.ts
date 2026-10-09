@@ -97,12 +97,13 @@ describe('buildStack', () => {
   }
 
   it('names each layer once, in order', () => {
-    expect(buildStack(deps, 2).map(([label]) => label)).toEqual([
+    expect(buildStack(deps, 3).map(([label]) => label)).toEqual([
       'Editor',
       'Frontend',
       'Storage',
       'Testing',
       'Serving',
+      'Python',
       'Packaging',
     ])
   })
@@ -142,17 +143,26 @@ describe('diagnosticsLine', () => {
   const base: DiagnosticsInputs = {
     version: '0.1.1',
     codemirror: '6.0.2',
-    schema: 2,
+    schema: 3,
+    pyodide: '314.0.7',
     storage: 'localStorage',
     autosavePaused: false,
     theme: 'dark',
     online: true,
+    runtime: null,
+    isolated: false,
   }
 
   it('builds the healthy line', () => {
-    expect(diagnosticsLine(base)).toBe(
-      'py-scratchpad v0.1.1 · CodeMirror 6.0.2 · schema v2 · storage localStorage · ' +
-        'autosave active · theme dark · online',
+    expect(diagnosticsLine({ ...base, runtime: { pyodide: '314.0.7', python: '3.14.2' } })).toBe(
+      'py-scratchpad v0.1.1 · CodeMirror 6.0.2 · schema v3 · storage localStorage · ' +
+        'autosave active · theme dark · online · python loaded · isolated no',
+    )
+  })
+
+  it('says python is not loaded before the first Run, and reports isolation', () => {
+    expect(diagnosticsLine({ ...base, isolated: true })).toContain(
+      'python not loaded · isolated yes',
     )
   })
 
@@ -166,8 +176,8 @@ describe('diagnosticsLine', () => {
         online: false,
       }),
     ).toBe(
-      'py-scratchpad v0.1.1 · CodeMirror 6.0.2 · schema v2 · storage in-memory · ' +
-        'autosave paused (other tab) · theme light · offline',
+      'py-scratchpad v0.1.1 · CodeMirror 6.0.2 · schema v3 · storage in-memory · ' +
+        'autosave paused (other tab) · theme light · offline · python not loaded · isolated no',
     )
   })
 
@@ -180,7 +190,7 @@ describe('diagnosticsLine', () => {
   it('carries no buffer content and no filename', () => {
     const line = diagnosticsLine(base)
     expect(line).not.toMatch(/\.py\b/)
-    expect(line.split(' · ')).toHaveLength(7)
+    expect(line.split(' · ')).toHaveLength(9)
   })
 })
 

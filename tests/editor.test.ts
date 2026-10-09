@@ -69,7 +69,7 @@ describe('editor and storage together', () => {
         lineEnding: '\n',
         bom: false,
       },
-      settings: { theme: 'dark', fontSize: 14 },
+      settings: { theme: 'dark', fontSize: 14, runMode: 'repl' },
     }
 
     expect(save(storage, stored).ok).toBe(true)

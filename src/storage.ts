@@ -12,10 +12,13 @@
  *    can be exported byte for byte (see `files.ts`). v1 payloads load as v2
  *    with the defaults for both, which is what a buffer typed into the editor
  *    would have had anyway.
+ *  - **v3** — adds `settings.runMode`, the Run button's REPL-echo / Script
+ *    choice (v0.3). Older payloads load as v3 with the `repl` default, which
+ *    is the mode a user who has never seen the toggle wants.
  *
- * v0.2 brings multiple files, which becomes **v3** with `files: [...]` plus
- * `active`; `migrate()` below is where that upgrade goes, and v2's `buffer`
- * maps onto the first entry of `files`.
+ * v0.2's multiple files will become **v4** with `files: [...]` plus `active`;
+ * `migrate()` below is where that upgrade goes, and v3's `buffer` maps onto
+ * the first entry of `files`.
  *
  * The storage *key* is a namespace, not the schema version: it stays
  * `py-scratchpad:v1` so an upgrade finds the user's existing data in place.
@@ -27,12 +30,13 @@ import {
   isLineEnding,
   type LineEnding,
 } from './files.ts'
+import { isRunMode, type RunMode } from './protocol.ts'
 
 export const STORAGE_KEY = 'py-scratchpad:v1'
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /** Schemas this build can read. Anything else is treated as corrupt. */
-const READABLE_VERSIONS: readonly number[] = [1, 2]
+const READABLE_VERSIONS: readonly number[] = [1, 2, 3]
 
 export const DEFAULT_FONT_SIZE = 14
 export const FONT_SIZE_MIN = 10
@@ -56,9 +60,14 @@ export interface BufferState {
   bom: boolean
 }
 
+/** The Run button's default mode; `repl` echoes bare expressions (schema v3). */
+export const DEFAULT_RUN_MODE: RunMode = 'repl'
+
 export interface Settings {
   theme: ThemeName
   fontSize: number
+  /** How Run compiles the buffer (schema v3). */
+  runMode: RunMode
 }
 
 export interface ScratchpadState {
@@ -127,7 +136,7 @@ export function defaultState(theme: ThemeName = 'dark'): ScratchpadState {
       lineEnding: DEFAULT_LINE_ENDING,
       bom: false,
     },
-    settings: { theme, fontSize: DEFAULT_FONT_SIZE },
+    settings: { theme, fontSize: DEFAULT_FONT_SIZE, runMode: DEFAULT_RUN_MODE },
   }
 }
 
@@ -147,16 +156,19 @@ function readSettings(raw: unknown, defaultTheme: ThemeName): Settings {
   return {
     theme: source.theme === 'light' || source.theme === 'dark' ? source.theme : defaultTheme,
     fontSize: typeof source.fontSize === 'number' ? clampFontSize(source.fontSize) : DEFAULT_FONT_SIZE,
+    runMode: isRunMode(source.runMode) ? source.runMode : DEFAULT_RUN_MODE,
   }
 }
 
 /**
- * Turn a parsed v1 or v2 payload into v2 state, repairing anything missing or
- * absurd. Returns null when the payload is not recognisable — the caller then
- * treats it as corrupt and backs the raw string up rather than clobbering it.
+ * Turn a parsed v1, v2 or v3 payload into v3 state, repairing anything missing
+ * or absurd. Returns null when the payload is not recognisable — the caller
+ * then treats it as corrupt and backs the raw string up rather than clobbering
+ * it.
  *
- * v1 is upgraded by omission: it has no `lineEnding` or `bom`, so the readers
- * below hand back the defaults and nothing else about the buffer changes.
+ * The older schemas are upgraded by omission: v1 has no `lineEnding` or `bom`
+ * and v2 has no `runMode`, so the readers below hand back the defaults and
+ * nothing else about the stored state changes.
  */
 function migrate(parsed: unknown, defaultTheme: ThemeName): ScratchpadState | null {
   if (!isRecord(parsed)) return null
