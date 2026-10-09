@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createOutputLimiter,
+  createPromptTracker,
   DEFAULT_OUTPUT_LIMITS,
   FLUSH_CHARS,
   FLUSH_MS,
@@ -117,6 +118,99 @@ describe('when the worker hands output over', () => {
     expect(shouldFlush(0, 10_000)).toBe(false)
   })
 })
+
+describe('the input() prompt', () => {
+  it('is the text written since the last newline', () => {
+    const prompt = createPromptTracker()
+
+    prompt.write('hello\n')
+    prompt.write('width: ')
+    expect(prompt.take()).toBe('width: ')
+  })
+
+  it('does not carry the first prompt into the second', () => {
+    // The 0.3.2 bug: `w = input("width: ")` followed by `h = input("height: ")`
+    // showed `width: height: ` at the second field.
+    const prompt = createPromptTracker()
+
+    prompt.write('width: ')
+    expect(prompt.take()).toBe('width: ')
+
+    prompt.write('height: ')
+    expect(prompt.take()).toBe('height: ')
+  })
+
+  it('keeps three consecutive prompts separate', () => {
+    const prompt = createPromptTracker()
+
+    for (const text of ['a: ', 'b: ', 'c: ']) {
+      prompt.write(text)
+      expect(prompt.take()).toBe(text)
+    }
+  })
+
+  it('handles a prompt with no trailing space', () => {
+    const prompt = createPromptTracker()
+
+    prompt.write('width:')
+    expect(prompt.take()).toBe('width:')
+
+    prompt.write('height:')
+    expect(prompt.take()).toBe('height:')
+  })
+
+  it('is not polluted by a print() between two inputs', () => {
+    const prompt = createPromptTracker()
+
+    prompt.write('width: ')
+    expect(prompt.take()).toBe('width: ')
+
+    // `print("ok")` reaches the stream as the text and the newline separately.
+    prompt.write('ok')
+    prompt.write('\n')
+    prompt.write('height: ')
+    expect(prompt.take()).toBe('height: ')
+  })
+
+  it('is empty for input() with no prompt', () => {
+    const prompt = createPromptTracker()
+
+    expect(prompt.take()).toBe('')
+
+    // Still empty after a completed line: a bare `input()` prints nothing, so
+    // there is nothing since the newline to show.
+    prompt.write('some output\n')
+    expect(prompt.take()).toBe('')
+
+    // And after an earlier prompt was answered.
+    prompt.write('width: ')
+    expect(prompt.take()).toBe('width: ')
+    expect(prompt.take()).toBe('')
+  })
+
+  it('takes the tail of a chunk that spans several lines', () => {
+    const prompt = createPromptTracker()
+
+    prompt.write('one\ntwo\nthree: ')
+    expect(prompt.take()).toBe('three: ')
+  })
+
+  it('ignores an empty write and starts each run clean', () => {
+    const prompt = createPromptTracker()
+
+    prompt.write('width: ')
+    prompt.write('')
+    expect(prompt.take()).toBe('width: ')
+
+    prompt.write('left over')
+    prompt.reset()
+    expect(prompt.take()).toBe('')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Clickable line references
+// ---------------------------------------------------------------------------
 
 describe('clickable line references', () => {
   it('links a traceback frame for this buffer', () => {

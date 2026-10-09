@@ -10,7 +10,7 @@ there is nothing to upload it to: the deployed site is static files behind nginx
 Python interpreter is WebAssembly served from the same origin.
 
 **Live at <https://py-scratchpad.com>** (`www` redirects to the apex). The current release is
-**0.3.2**.
+**0.3.3**.
 
 ![The py-scratchpad editor on its dark theme, filename hello.py, in REPL echo mode. The buffer
 holds bare arithmetic expressions, a celsius() function and a for loop; the output panel below
@@ -99,7 +99,7 @@ The image is on Docker Hub as
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.2
+  -p 8080:80 0xwulf/py-scratchpad:0.3.3
 ```
 
 Then open `http://<host>:8080/`. There is no data directory to create and nothing to configure.
@@ -107,7 +107,7 @@ Then open `http://<host>:8080/`. There is no data directory to create and nothin
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.2 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.3 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -130,7 +130,7 @@ documentation; [docs/DEPLOY.md](docs/DEPLOY.md) is the release and deploy runboo
 
 ## Status
 
-0.3.2 is the current release and is what both hostnames serve. v0.1 was the editor, autosave
+0.3.3 is the current release and is what both hostnames serve. v0.1 was the editor, autosave
 and import/export; **v0.3 added the Run button** ([docs/PLAN.md](docs/PLAN.md) §9 step 7), and
 was taken before v0.2 because running code is what the editor was wanted for. **v0.2 —
 multi-file and zip export — is not built**: there is one buffer, and that is all there is.

@@ -182,6 +182,36 @@ test('input() asks inline and takes the answer', async ({ page }) => {
   await expect(page.locator('#output-log')).toContainText('hello Ada')
 })
 
+test('a second input() is asked with its own prompt, not every earlier one', async ({ page }) => {
+  // The 0.3.2 bug: the prompt was the whole of stdout since the last newline
+  // and was never consumed, so this program asked `width: height: ` second.
+  await seed(page, 'w = input("width: ")\nh = input("height: ")\nprint(int(w) * int(h))\n', 'script')
+
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+
+  const prompt = page.locator('#stdin-prompt')
+  const field = page.locator('#stdin-input')
+
+  await expect(prompt).toBeVisible({ timeout: 120_000 })
+  await expect(prompt).toHaveText('width: ')
+  await field.fill('3')
+  await field.press('Enter')
+
+  // Exactly the second prompt, with nothing of the first left in it.
+  await expect(prompt).toHaveText('height: ', { timeout: 30_000 })
+  await field.fill('4')
+  await field.press('Enter')
+
+  await expect(page.locator('#output-status')).toHaveText(/^Done /, { timeout: 30_000 })
+  await expect(page.locator('#output-log')).toContainText('12')
+
+  // The prompt reaches the panel once, as the stdout write it is — the inline
+  // label is not a second copy of it. The answers are echoed where they were
+  // typed, the way a terminal shows them.
+  const text = await outputText(page)
+  expect(text.trim().split('\n')).toEqual(['width: 3', 'height: 4', '12'])
+})
+
 /**
  * The other half of Part C: what the page does where it is **not** isolated —
  * `http://192.168.50.120:5040`, say. The headers are stripped on the way

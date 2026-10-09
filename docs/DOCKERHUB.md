@@ -27,7 +27,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.2
+  -p 8080:80 0xwulf/py-scratchpad:0.3.3
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -40,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.2
+  0xwulf/py-scratchpad:0.3.3
 ```
 
 ## Docker Compose
@@ -48,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.2 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.3 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -75,7 +75,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.2`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.3`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -193,6 +193,12 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.3** — fixes the `input()` prompt when a program asks more than once. The prompt is
+  whatever the program wrote to stdout since the last newline — there is nothing else to read it
+  from, since `input("width: ")` is a plain write with no newline followed by a read — but that
+  text was never cleared once it had been shown. A program with two questions asked the second
+  one as `width: height: `. Reading the prompt now consumes it, on both input paths, so each
+  question carries only its own text. Nothing else changed in the app.
 - **0.3.2** — `no-transform` on every `Cache-Control` the container sends. Cloudflare Web
   Analytics was injecting a beacon script into the HTML of both hostnames; a bare `curl` could
   not see it, because the rewriter only acts on browser-shaped requests, which is how 0.3.0 and

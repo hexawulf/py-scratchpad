@@ -26,6 +26,7 @@ import type { PyodideInterface } from 'pyodide'
 
 import {
   createOutputLimiter,
+  createPromptTracker,
   FLUSH_MS,
   shouldFlush,
   TRUNCATED_NOTICE,
@@ -84,11 +85,11 @@ let pending: { stream: 'out' | 'err'; text: string }[] = []
 let pendingChars = 0
 let lastFlush = 0
 /**
- * The current partial line of stdout — everything printed since the last
- * newline. That is exactly what `input("name? ")` leaves behind, so it is the
- * prompt the page shows next to its input field.
+ * The prompt the next `input()` will carry, accumulated from stdout. See
+ * `createPromptTracker`: the rule is the text since the last newline *or* the
+ * last `input()`, whichever came later.
  */
-let partialLine = ''
+const promptTracker = createPromptTracker()
 
 function flushOutput(): void {
   if (pending.length === 0) return
@@ -106,10 +107,7 @@ function flushOutput(): void {
 function emit(stream: 'out' | 'err', text: string): void {
   if (text === '') return
 
-  if (stream === 'out') {
-    const lastBreak = text.lastIndexOf('\n')
-    partialLine = lastBreak === -1 ? partialLine + text : text.slice(lastBreak + 1)
-  }
+  if (stream === 'out') promptTracker.write(text)
 
   const wasTruncated = limiter.truncated
   const kept = limiter.accept(text)
@@ -168,8 +166,11 @@ function installStreams(py: PyodideInterface): void {
       // this thread parks, or the user is asked a question they cannot see.
       flushOutput()
 
+      // Taken before the branch, so the prompt is consumed on both input
+      // paths and the bookkeeping cannot differ between them.
+      const prompt = promptTracker.take()
+
       if (stdin !== null) {
-        const prompt = partialLine
         beginStdinWait(stdin)
         post({ kind: 'stdin', id: current?.id ?? 0, prompt })
         return awaitStdinLine(stdin)
@@ -248,7 +249,7 @@ function execute(request: RunRequest): void {
   limiter.reset()
   pending = []
   pendingChars = 0
-  partialLine = ''
+  promptTracker.reset()
   lastFlush = performance.now() - FLUSH_MS
   nextQueuedLine = stdin === null ? createLineQueue(request.inputLines) : null
   if (stdin !== null) resetStdin(stdin)

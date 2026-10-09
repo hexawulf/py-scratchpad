@@ -122,6 +122,52 @@ export function shouldFlush(pendingChars: number, msSinceLastFlush: number): boo
 }
 
 // ---------------------------------------------------------------------------
+// The input() prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * What the page shows beside its input field: the stdout text written since
+ * the last newline **and since the last `input()`**.
+ *
+ * There is no prompt in the protocol between CPython and a stream — `input("x? ")`
+ * is a plain write of `x? ` with no newline, followed by a read — so the only
+ * way to recover it is to remember the tail of stdout. Hence the first half of
+ * the rule. The second half is what makes it a prompt rather than a running
+ * total: reading it has to consume it, or the next `input()` in the same
+ * program is handed everything printed before it too.
+ */
+export interface PromptTracker {
+  /** Record text written to stdout. */
+  write(text: string): void
+  /** The prompt for the `input()` starting now. Consumes it. */
+  take(): string
+  /** Start a new run. */
+  reset(): void
+}
+
+export function createPromptTracker(): PromptTracker {
+  let pending = ''
+
+  return {
+    write(text) {
+      if (text === '') return
+      const lastBreak = text.lastIndexOf('\n')
+      pending = lastBreak === -1 ? pending + text : text.slice(lastBreak + 1)
+    },
+
+    take() {
+      const prompt = pending
+      pending = ''
+      return prompt
+    },
+
+    reset() {
+      pending = ''
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Clickable line references
 // ---------------------------------------------------------------------------
 
