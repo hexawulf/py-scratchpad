@@ -22,7 +22,7 @@ Hub. piapps2 **pulls a pinned tag** and never builds; it holds one file.
 | Container | `py-scratchpad` |
 | Image | `0xwulf/py-scratchpad:X.Y.Z` — pinned, so watchtower is opted out |
 | LAN endpoint | `http://192.168.50.120:5040/` |
-| Public URL | `https://python.piapps.dev` (piapps nginx vhost — see PLAN.md §6) |
+| Public URL | `https://python.piapps.dev` (piapps nginx vhost — see §6 below) |
 
 All commands use `docker compose -f` with an absolute path, so they work from
 any working directory.
@@ -215,11 +215,106 @@ confirmation and is never part of a rollback.
 
 ---
 
-## 5. Notes
+## 6. Public ingress (piapps nginx vhost)
 
-- **Ingress, DNS and monitoring are not covered here.** The piapps nginx vhost,
-  the Cloudflare `python` record and the Uptime Kuma monitor are PLAN.md §6–§7
-  and sit behind the operator approval gate.
+Live since 2026-10-09. **Production nginx on piapps is an operator approval gate** —
+read this section, then propose, then wait for approval before touching it.
+
+| Thing | Value |
+|---|---|
+| Vhost file | `/etc/nginx/sites-available/python.piapps.dev` (symlinked into `sites-enabled`) |
+| Reference it was copied from | `/etc/nginx/sites-available/stocky.piapps.dev` |
+| Backend | `proxy_pass http://192.168.50.120:5040` |
+| TLS | shared wildcard `piapps.dev-0001` — `/etc/letsencrypt/live/piapps.dev-0001/` |
+| Cloudflare | `python.piapps.dev` A → `122.116.150.249`, **Proxied**, zone SSL mode Full (strict) |
+| Monitor | Uptime Kuma id 60, `py-scratchpad`, keyword monitor, keyword `py-scratchpad` |
+
+**The certificate needs no work, ever.** `piapps.dev-0001` is a wildcard (SAN `piapps.dev` +
+`*.piapps.dev`), so `python.piapps.dev` is already covered — exactly as `stocky` and `kuma` are,
+and none of the three has a renewal config of its own. It renews itself via DNS-01
+(`authenticator = dns-cloudflare`) with `renew_hook = systemctl reload nginx`.
+**Never delete this certificate while rolling back a single vhost:** it serves `piapps.dev` and
+every subdomain.
+
+**No `add_header` belongs in this vhost.** The container owns the security headers
+(`docker/security-headers.conf`) and nothing on piapps adds headers at http level, in `conf.d/`
+or in `snippets/`. An `add_header` here would make each one appear **twice** on the public URL.
+`cloudflare_real_ip.conf` is likewise already loaded at http level — do not include it per-vhost.
+
+### 6.1 Changing the vhost
+
+Never edit it in place. Write the file locally, copy it, install it, then test and reload:
+
+```
+scp /path/to/python.piapps.dev piapps:/tmp/python.piapps.dev
+ssh piapps 'sudo nginx -T > /home/zk/backups/piapps-nginx-T.bak_$(date +%Y%m%d_%H%M%S)'
+ssh piapps 'sudo install -m 644 -o root -g root /tmp/python.piapps.dev /etc/nginx/sites-available/python.piapps.dev'
+ssh piapps 'sudo nginx -t'
+ssh piapps 'sudo systemctl reload nginx'
+ssh piapps 'sudo journalctl -u nginx --since "5 min ago" --no-pager ; rm -f /tmp/python.piapps.dev'
+```
+
+`reload`, never `restart` — a restart drops every other site on piapps with it.
+
+**Always regression-check the other vhosts on that nginx afterwards.** They share the process
+and the wildcard cert:
+
+```
+for u in https://stocky.piapps.dev https://kuma.piapps.dev https://piapps.dev ; do printf '%-34s ' "$u" ; curl -s -o /dev/null -w '%{http_code}\n' "$u" ; done
+```
+
+Expected, unchanged: `stocky 200`, `kuma 302`, `piapps.dev 200`.
+
+### 6.2 Rollback
+
+Removing the symlink is the whole rollback; the `sites-available` file and the certificate stay.
+
+```
+ssh piapps 'sudo rm /etc/nginx/sites-enabled/python.piapps.dev'
+ssh piapps 'sudo nginx -t ; sudo systemctl reload nginx'
+```
+
+The hostname then returns Cloudflare **525** again — the `443 default_server` has
+`ssl_reject_handshake on`, so an SNI no vhost claims is refused at the handshake. That is the
+expected post-rollback state, not a fault.
+
+### 6.3 Verifying the public URL
+
+```
+curl -sI https://python.piapps.dev/
+curl -sI https://python.piapps.dev/assets/<hashed>.js
+curl -s -o /dev/null -w '%{http_code}\n' https://python.piapps.dev/does-not-exist
+```
+
+- `/` → `200`, `cache-control: no-cache`; `/assets/*` → `200`, `public, max-age=31536000, immutable`;
+  `*.js.map` and an unknown path → `404`, `no-store`.
+- **Each security header must appear exactly once.** Count them, don't eyeball presence:
+  ```
+  H=$(curl -sI https://python.piapps.dev/) ; for h in content-security-policy x-content-type-options referrer-policy cache-control ; do printf '%-28s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done
+  ```
+- **Prove Cloudflare is not rewriting the page.** The zone has Web Analytics with
+  `auto_install: true`, which *could* inject `static.cloudflareinsights.com/beacon.min.js` — that
+  would break the no-CDN rule and trip `script-src 'self'`. It is not injecting today; this is the
+  check that would catch it:
+  ```
+  curl -s https://python.piapps.dev/ | sha256sum
+  ssh piapps 'curl -s http://192.168.50.120:5040/ | sha256sum'
+  ```
+  The two must match. If they ever diverge, turn auto-install off for the zone — **do not** widen
+  the CSP to accommodate it.
+- `curl -sI http://python.piapps.dev` returns 301 from the **Cloudflare edge**
+  (`always_use_https` is on), so it does not prove the origin. For that, ask the origin directly:
+  ```
+  curl -sI -H 'Host: python.piapps.dev' http://192.168.50.102/
+  ```
+
+---
+
+## 7. Notes
+
+- **Ingress, DNS and monitoring:** the piapps nginx vhost is §6 above. The Cloudflare `python`
+  record and the Uptime Kuma monitor were set up in the same step (2026-10-09) and need no
+  routine maintenance.
 - **piapps2 is not a git checkout.** It holds `docker-compose.yml` and nothing
   else, matching `/home/zk/bots/stocky`. The repo is the source of truth; §2.1
   copies the file and checksums both ends.

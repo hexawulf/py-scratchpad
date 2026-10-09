@@ -155,17 +155,54 @@ py-scratchpad/
 
 ## 6. Ingress (piapps) — production nginx, operator approval required
 
-Follow the Kuma vhost pattern from [[2026-10-03-uptime-kuma-piapps2-implementation-runbook]] §4.2–4.4:
+**Done 2026-10-09.** The live procedure, the vhost itself and its rollback are in
+`docs/DEPLOY.md` §6. What follows is the plan as executed, with the two corrections
+this step turned up.
 
-- `/etc/nginx/sites-available/python.piapps.dev`: port 80 → 301; 443 with `http2 on`, the Cloudflare origin cert `/etc/ssl/cloudflare/piapps.dev.crt` / `.key`, the `cloudflare_real_ip.conf` include (check that conf.d doesn't already pull it in), the dotfile deny block, and `proxy_pass http://192.168.50.120:5040;`. No WebSocket headers needed.
-- Copy `listen`/`http2` syntax from an existing vhost.
-- Make sure the proxy **passes the container's headers through** (CSP, COOP/COEP, Cache-Control). Do not add duplicate `add_header` lines on piapps.
-- Steps: `sudo nano …` → `sudo ln -s …` → `sudo nginx -t` → `sudo systemctl reload nginx` → `journalctl -u nginx --since "5 min ago"`.
-- **Cloudflare DNS:** add `python` in the same pattern as `kuma`/`netdata`, set to Proxied (orange), with SSL mode Full (strict).
+The reference is **`stocky.piapps.dev`**, not Kuma — stocky is the exact precedent, a piapps2
+container behind a piapps vhost. Kuma is a secondary reference and its WebSocket
+(`Upgrade`/`Connection "upgrade"`) and ACME-challenge blocks must **not** be copied.
+
+- `/etc/nginx/sites-available/python.piapps.dev`: port 80 → 301; 443 with `http2 on`, the dotfile deny
+  block, and `proxy_pass http://192.168.50.120:5040;`. No WebSocket headers, no `add_header`.
+- **Correction 1 — the certificate.** This plan said to use a Cloudflare origin cert at
+  `/etc/ssl/cloudflare/piapps.dev.crt`. **That file does not exist and piapps does not work that way.**
+  piapps uses **Let's Encrypt**, and `*.piapps.dev` is served by one **shared wildcard**: cert name
+  `piapps.dev-0001`, SAN `piapps.dev` + `*.piapps.dev`, at
+  `/etc/letsencrypt/live/piapps.dev-0001/fullchain.pem` / `privkey.pem`. `python.piapps.dev` was
+  **already covered**, exactly as `stocky` and `kuma` are, so **no certificate was issued and no
+  renewal config was touched.** Renewal is automatic (`renew_hook = systemctl reload nginx`); the
+  wildcard was issued via DNS-01 (`authenticator = dns-cloudflare`), which is the only option for a
+  wildcard — so the "does HTTP-01 work behind the orange cloud" question never arises.
+  A rollback must **never** delete this cert: it serves piapps.dev and every subdomain.
+- **Correction 2 — the real-IP include.** `cloudflare_real_ip.conf` is **already loaded at http level**
+  via `include /etc/nginx/conf.d/*.conf;` in `nginx.conf`. stocky does not include it by name, and
+  neither does this vhost. Do not add it.
+- The proxy **passes the container's headers through** (CSP, nosniff, Referrer-Policy, Cache-Control).
+  Nothing on piapps adds headers at http level, in `conf.d/` or in `snippets/` (grepped), so there is
+  no duplication — verified with a per-header occurrence count on the public URL, not just presence.
+- Steps as executed: write locally → `scp` to `piapps:/tmp` → `sudo install -m 644` into
+  `sites-available` → `sudo ln -s` into `sites-enabled` → `sudo nginx -t` →
+  `sudo systemctl reload nginx` (reload, not restart) → `journalctl -u nginx --since "5 min ago"`.
+- **Cloudflare DNS: no change was needed.** The `python` A record already existed and already matched
+  `stocky`/`kuma` byte for byte — `122.116.150.249`, Proxied (orange), TTL auto — and the zone SSL mode
+  is already Full (strict). Before the vhost existed the hostname returned **525**, because the `443
+  default_server` has `ssl_reject_handshake on` and no vhost claimed that SNI.
+- **Cloudflare caveat.** The zone has Web Analytics with `auto_install: true`, which *can* inject
+  `static.cloudflareinsights.com/beacon.min.js` into proxied HTML — which would break the no-CDN rule
+  and trip `script-src 'self'`. It is not injecting (public `index.html` is byte-identical to the
+  origin). Guard it with the sha256 check below rather than trusting the setting; the fix, if it ever
+  fires, is to turn auto-install off — **not** to widen the CSP.
 - **Verify from linuxsvr:**
   ```bash
   dig +short python.piapps.dev
-  curl -sI https://python.piapps.dev | head -n 10
+  echo | openssl s_client -connect 192.168.50.102:443 -servername python.piapps.dev 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
+  curl -sI https://python.piapps.dev/
+  # always_use_https makes the edge answer :80, so prove the ORIGIN redirect directly:
+  curl -sI -H 'Host: python.piapps.dev' http://192.168.50.102/
+  # no Cloudflare rewriting:
+  curl -s https://python.piapps.dev/ | sha256sum
+  ssh piapps 'curl -s http://192.168.50.120:5040/ | sha256sum'
   ```
 
 Optional: a Cloudflare Access policy or an IP allowlist, if you'd rather not make it public. There is no server-side data, so public is low risk.
@@ -174,9 +211,16 @@ Optional: a Cloudflare Access policy or an IP allowlist, if you'd rather not mak
 
 ## 7. Monitoring and docs
 
-- Uptime Kuma: an HTTP(s) monitor for `https://python.piapps.dev` with keyword `py-scratchpad` in the page title. See [[uptime-kuma-piapps2]].
-- Update [[sigint-piapps2-cronjobs-reference]] only if a cron gets added (none is planned).
-- After it is live, set this note's `status:` to `live`, and add the service, port and vhost to the hexawulf-homelab skill's piapps2 service list.
+- Uptime Kuma: **done 2026-10-09** — monitor id 60, name `py-scratchpad`, type **keyword**,
+  URL `https://python.piapps.dev`, keyword `py-scratchpad` (it is the `<title>`), interval 60 s,
+  retry 60 s, 2 retries, resend 30, accepted `200-299`, notification 1 `SIGINT → hexawulf`, no parent
+  group. Field-for-field a copy of the `pitasker` / `netdata` monitors. First heartbeat:
+  `UP — 200 - OK, keyword is found`. See [[uptime-kuma-piapps2]].
+  Note: `kuma-push-provision.py` could not be used — it is push-only.
+- Update [[sigint-piapps2-cronjobs-reference]] only if a cron gets added (none is planned, none added).
+- **Done 2026-10-09:** the vault note's `status:` is `live`, and the service, port and vhost are in the
+  hexawulf-homelab skill (`references/hosts-detail.md` piapps2 container list and
+  `references/network.md` §6 vhost table).
 
 ---
 
@@ -204,7 +248,7 @@ Browser-only Python scratchpad served as static files. No backend, no accounts, 
 2. **Editor + autosave:** one buffer, theme toggle, font size. Check by reloading the page: the code is still there.
 3. **Import/export:** Open, drag-drop, Download, `Ctrl+S`. Round-trip a `.py` file and diff it against the original: it must be identical, including the trailing newline and tabs vs spaces.
 4. **Docker + deploy to piapps2:** curl the LAN port.
-5. **Ingress + DNS** (approval gate): browse `https://python.piapps.dev`, and add the Kuma monitor. **v0.1 is done here.**
+5. **Ingress + DNS** (approval gate): browse `https://python.piapps.dev`, and add the Kuma monitor. **v0.1 is done here.** — **done 2026-10-09** (§6, §7; no cert and no DNS change were needed).
 6. **v0.2 multi-file + zip export.**
 7. **v0.3 Pyodide:** worker runner, Stop, output panel; then the `input()` bridge with COOP/COEP.
 
