@@ -1,0 +1,18 @@
+# Local development override. Used alongside docker-compose.yml, never on its own:
+#
+#   docker compose -f /home/zk/projects/python/py-scratchpad/docker-compose.yml \
+#                  -f /home/zk/projects/python/py-scratchpad/docker-compose.dev.yml up -d --build
+#
+# It builds the working tree instead of pulling the pinned release, tags the
+# result py-scratchpad:dev so it can never be confused with a published image,
+# and binds the port to loopback — 192.168.50.120 is piapps2's address and does
+# not exist on a workstation. `ports: !override` replaces the list; a plain
+# entry would be *appended* to it and compose would still try the .120 bind.
+services:
+  py-scratchpad:
+    build:
+      context: .
+    image: py-scratchpad:dev
+    pull_policy: build
+    ports: !override
+      - "127.0.0.1:5040:80"

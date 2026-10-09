@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Browser-only Python scratchpad: CodeMirror 6 editor, localStorage autosave, no backend.",
+  "engines": {
+    "node": "^22.18.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

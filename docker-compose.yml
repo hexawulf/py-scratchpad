@@ -1,4 +1,10 @@
-# py-scratchpad on piapps2. Locally built image, so watchtower must skip it.
+# py-scratchpad (github.com/hexawulf/py-scratchpad) on piapps2.
+# No data: everything the user types lives in their browser's localStorage.
+# Update deliberately: change the pinned tag, then `docker compose pull` and
+# `docker compose up -d`. The tag is pinned, so watchtower must skip it.
+#
+# Local test builds use docker-compose.dev.yml alongside this file; see
+# docs/DEPLOY.md §3.
 #
 # The port is bound to the piapps2 LAN address only (192.168.50.120, the eth0
 # address — never .179/wlan0). piapps nginx proxies to it; nothing else should
@@ -10,9 +16,7 @@
 
 services:
   py-scratchpad:
-    build:
-      context: .
-    image: py-scratchpad:local
+    image: 0xwulf/py-scratchpad:0.1.0
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
