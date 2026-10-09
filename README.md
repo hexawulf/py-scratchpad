@@ -71,3 +71,7 @@ To check the same thing by hand, open each fixture in the browser, click Downloa
 ```bash
 cd /home/zk/projects/python/py-scratchpad && for f in tests/fixtures/*.py; do n=$(basename "$f"); cmp -s "$f" "$HOME/Downloads/$n" && echo "IDENTICAL $n" || echo "DIFFERS   $n"; done
 ```
+
+## License
+
+[MIT](LICENSE)

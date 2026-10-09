@@ -137,3 +137,4 @@ resolve to the most restrictive value.
 - Deployment and release guide: https://github.com/hexawulf/py-scratchpad/blob/main/docs/DEPLOY.md
 - Release workflow: https://github.com/hexawulf/py-scratchpad/actions/workflows/release.yml
 - Issues: https://github.com/hexawulf/py-scratchpad/issues
+- Licence: [MIT](https://github.com/hexawulf/py-scratchpad/blob/main/LICENSE)

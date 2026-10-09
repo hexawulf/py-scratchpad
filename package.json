@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Browser-only Python scratchpad: CodeMirror 6 editor, localStorage autosave, no backend.",
+  "license": "MIT",
   "engines": {
     "node": "^22.18.0"
   },
