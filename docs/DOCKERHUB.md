@@ -17,7 +17,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.1.1
+  -p 8080:80 0xwulf/py-scratchpad:0.1.2
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -30,7 +30,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.1.1
+  0xwulf/py-scratchpad:0.1.2
 ```
 
 ## Docker Compose
@@ -38,7 +38,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.1.1 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.1.2 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -65,7 +65,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.1.1`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.1.2`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -127,6 +127,11 @@ conflicting headers.
 
 ## Changelog
 
+- **0.1.2** — two interface fixes. The notice bar no longer sits on screen
+  from the first paint showing bare Reload / Keep mine buttons: an author rule
+  setting `display` was overriding the browser's `[hidden]`, so nothing it
+  marked hidden ever hid. The About button is now a drawn icon in a true
+  circle rather than a text glyph that sat off-centre in it.
 - **0.1.1** — adds an About dialog: the version and build month, the exact
   stack versions, contact and links, and a one-line diagnostics string with a
   Copy button to paste into a bug report. The line carries no buffer content

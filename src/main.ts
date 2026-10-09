@@ -22,6 +22,12 @@ import {
   type StorageLike,
   type ThemeName,
 } from './storage.ts'
+import {
+  CONFLICT_NOTICE,
+  type NoticeState,
+  type NoticeTone,
+  RELOADED_NOTICE,
+} from './notice.ts'
 import { decideOnExternalWrite, shouldWarnBeforeUnload } from './tabsync.ts'
 
 /** Debounce for autosave. Short enough that a crash loses a keystroke, not a line. */
@@ -51,11 +57,17 @@ root.innerHTML = `
       </span>
       <button type="button" id="theme-toggle" class="theme-toggle"></button>
       <button type="button" id="about-open" class="icon-button" aria-label="About"
-              title="About" aria-haspopup="dialog"><span aria-hidden="true">&#9432;</span></button>
+              title="About" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4" />
+          <path d="M12 8h.01" />
+        </svg>
+      </button>
     </header>
     <div id="editor" class="editor"></div>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden>
-      <span id="notice-text"></span>
+      <span id="notice-text" class="notice-text"></span>
       <span id="notice-actions" class="notice-actions" hidden>
         <button type="button" id="notice-reload">Reload</button>
         <button type="button" id="notice-keep">Keep mine</button>
@@ -125,7 +137,7 @@ let fileMeta: FileMeta = {
 let noticeTimer: number | undefined
 let saveFailed = false
 
-function showNotice(message: string, tone: 'info' | 'error', withActions = false): void {
+function showNotice(message: string, tone: NoticeTone, withActions = false): void {
   noticeTextEl.textContent = message
   noticeActionsEl.hidden = !withActions
   noticeEl.classList.toggle('notice-error', tone === 'error')
@@ -134,6 +146,11 @@ function showNotice(message: string, tone: 'info' | 'error', withActions = false
   // Errors and prompts stay up: they are waiting for the user, not reporting.
   noticeTimer =
     tone === 'info' && !withActions ? window.setTimeout(hideNotice, NOTICE_TIMEOUT_MS) : undefined
+}
+
+/** Show one of the fixed notices from notice.ts, message and actions together. */
+function showNoticeState(state: NoticeState): void {
+  showNotice(state.message, state.tone, state.actions)
 }
 
 function hideNotice(): void {
@@ -297,7 +314,7 @@ window.addEventListener('storage', (event) => {
   conflictPending = true
   cancelSaveTimer()
   updateUnloadGuard()
-  showNotice('Changed in another tab — autosave is paused here.', 'error', true)
+  showNoticeState(CONFLICT_NOTICE)
 })
 
 /** Take the other tab's version: re-read storage and rebuild everything. */
@@ -327,7 +344,7 @@ function reloadFromStorage(): void {
   updateUnloadGuard()
 
   if (result.problem !== undefined) showNotice(result.problem.message, 'error')
-  else showNotice('Reloaded the version from the other tab.', 'info')
+  else showNoticeState(RELOADED_NOTICE)
   editor.focus()
 }
 

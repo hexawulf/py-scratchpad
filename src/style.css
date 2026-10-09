@@ -16,6 +16,8 @@
   --accent: #89b4fa;
   --error-bg: #3a1f28;
   --error-fg: #f2b8c6;
+  /* Fill for a hovered icon button; stocky's --color-background-mute. */
+  --hover-bg: #313244;
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -31,6 +33,7 @@
   --accent: #1e66f5;
   --error-bg: #fde8ec;
   --error-fg: #8c1f35;
+  --hover-bg: #e2e4ee;
 
   color-scheme: light;
 }
@@ -43,6 +46,20 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
+}
+
+/*
+ * `hidden` has to actually hide. The browser's own `[hidden] { display: none }`
+ * lives in the user-agent origin, which loses to *every* author rule regardless
+ * of specificity — so any class here that sets `display` silently defeats it.
+ * That is what kept the notice bar and its Reload / Keep mine buttons on screen
+ * from the first paint with no message in them: `.notice { display: flex }` and
+ * `.notice-actions { display: inline-flex }` were overriding the attribute.
+ * Keep this rule above anything that sets `display`, and keep the !important:
+ * it is the only thing that survives a later class.
+ */
+[hidden] {
+  display: none !important;
 }
 
 /* Lock the shell to the viewport so only the editor scrolls. */
@@ -58,7 +75,12 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
+  /*
+   * Equal gutters, matching stocky's topbar (`padding: 0 0.75rem`). The round
+   * icon button is borderless, so its circle reaches its own box edge and a
+   * 0.6rem gutter read as flush against the window.
+   */
+  padding: 0.4rem 0.75rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -171,6 +193,17 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
+/*
+ * Take the free space and wrap inside the bar, so a long message neither
+ * pushes the buttons off the row nor collapses to nothing. `min-width: 0`
+ * is what lets it shrink past its longest word instead of forcing the
+ * container to wrap.
+ */
+.notice-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .notice-error {
   color: var(--error-fg);
   background: var(--error-bg);
@@ -212,27 +245,53 @@ button:disabled {
  * About dialog
  * ------------------------------------------------------------------------ */
 
-/* Round icon button in the toolbar, like stocky's ⓘ / ⚙ pair. */
+/*
+ * Round icon button, copied from stocky's `.icon-btn` (AppShell.vue): a square
+ * box with no padding and no border, so the 50% radius is a true circle
+ * centred on the box, and the hover fill is that same circle.
+ *
+ * `inline-grid` + `place-items: center` centres the icon on both axes without
+ * depending on a font's metrics, and `line-height: 0` stops the inline box
+ * from adding half-leading under it. Both matter: the old version centred the
+ * ⓘ *text box*, and the glyph does not sit centred inside its own em box, so
+ * the circle looked offset from the visible "i". An inline SVG has no such
+ * metrics — hence the icon is drawn, not typed.
+ */
 .icon-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
   flex: none;
   width: 1.9rem;
   min-width: 0;
   height: 1.9rem;
   padding: 0;
-  font-size: 1.05rem;
-  line-height: 1;
+  line-height: 0;
   color: var(--muted);
   background: none;
-  border-color: transparent;
+  border: none;
   border-radius: 50%;
+}
+
+.icon-button svg {
+  display: block;
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .icon-button:hover:not(:disabled) {
   color: var(--fg);
-  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+
+/* stocky's ring: 2px accent at a 2px offset, which follows the 50% radius. */
+.icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /*
