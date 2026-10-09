@@ -68,6 +68,8 @@ export interface EditorHandle {
   view: EditorView
   getContent: () => string
   getCursor: () => CursorState
+  /** Replace the whole document, keeping the undo history. */
+  setContent: (content: string, cursor?: CursorState) => void
   setTheme: (theme: ThemeName) => void
   setFontSize: (px: number) => void
   focus: () => void
@@ -96,6 +98,18 @@ export function createEditor(options: EditorOptions): EditorHandle {
     getCursor: () => {
       const range = view.state.selection.main
       return { anchor: range.anchor, head: range.head }
+    },
+    /**
+     * A single replacing transaction rather than a new state, so Ctrl+Z still
+     * brings back whatever an Open or a reload displaced.
+     */
+    setContent: (content, cursor) => {
+      const next = clampCursor(cursor ?? { anchor: 0, head: 0 }, content.length)
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: content },
+        selection: EditorSelection.single(next.anchor, next.head),
+        scrollIntoView: true,
+      })
     },
     setTheme: (theme) => {
       view.dispatch({ effects: themeCompartment.reconfigure(themeExtension(theme)) })

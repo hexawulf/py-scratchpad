@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
+import { DEFAULT_NAME } from '../src/files.ts'
 import {
   clampCursor,
   clampFontSize,
   DEFAULT_FONT_SIZE,
-  DEFAULT_NAME,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   load,
@@ -38,7 +38,13 @@ const EXPECTED_BACKUP_KEY = `${STORAGE_KEY}:corrupt-2026-10-09T12:34:56.000Z`
 function stateWith(content: string, anchor = 0, head = anchor): ScratchpadState {
   return {
     version: SCHEMA_VERSION,
-    buffer: { name: DEFAULT_NAME, content, cursor: { anchor, head } },
+    buffer: {
+      name: DEFAULT_NAME,
+      content,
+      cursor: { anchor, head },
+      lineEnding: '\n',
+      bom: false,
+    },
     settings: { theme: 'dark', fontSize: DEFAULT_FONT_SIZE },
   }
 }
@@ -47,12 +53,19 @@ describe('load defaults', () => {
   it('returns a usable empty state when nothing is stored', () => {
     const storage = new MemoryStorage()
 
-    const { state, problem } = load(storage)
+    const { state, raw, problem } = load(storage)
 
     expect(problem).toBeUndefined()
+    expect(raw).toBeNull()
     expect(state).toEqual({
       version: SCHEMA_VERSION,
-      buffer: { name: DEFAULT_NAME, content: '', cursor: { anchor: 0, head: 0 } },
+      buffer: {
+        name: DEFAULT_NAME,
+        content: '',
+        cursor: { anchor: 0, head: 0 },
+        lineEnding: '\n',
+        bom: false,
+      },
       settings: { theme: 'dark', fontSize: DEFAULT_FONT_SIZE },
     })
   })
@@ -77,9 +90,10 @@ describe('load defaults', () => {
     const storage = new MemoryStorage()
     storage.getThrows = new Error('access denied')
 
-    const { state, problem } = load(storage)
+    const { state, raw, problem } = load(storage)
 
     expect(problem).toEqual({ kind: 'unavailable', message: 'access denied' })
+    expect(raw).toBeNull()
     expect(state.buffer.content).toBe('')
   })
 })
@@ -92,12 +106,26 @@ describe('save and load round-trip', () => {
     original.settings = { theme: 'light', fontSize: 22 }
     original.buffer.name = 'notes.py'
 
-    expect(save(storage, original)).toEqual({ ok: true })
-    const { state, problem } = load(storage)
+    const written = save(storage, original)
+    expect(written.ok).toBe(true)
+    const { state, raw, problem } = load(storage)
 
     expect(problem).toBeUndefined()
     expect(state).toEqual(original)
     expect(state.buffer.content).toBe(content)
+    // `raw` is exactly the string that was written, for the multi-tab guard.
+    expect(raw).toBe(written.ok ? written.raw : null)
+  })
+
+  it('preserves the imported file metadata', () => {
+    const storage = new MemoryStorage()
+    const original = stateWith('x = 1\n')
+    original.buffer.lineEnding = '\r\n'
+    original.buffer.bom = true
+
+    save(storage, original)
+
+    expect(load(storage).state.buffer).toMatchObject({ lineEnding: '\r\n', bom: true })
   })
 
   it('restores the selection, not just the caret', () => {
@@ -121,8 +149,88 @@ describe('save and load round-trip', () => {
       name: DEFAULT_NAME,
       content: 'x = 1\n',
       cursor: { anchor: 0, head: 0 },
+      lineEnding: '\n',
+      bom: false,
     })
     expect(state.settings).toEqual({ theme: 'dark', fontSize: DEFAULT_FONT_SIZE })
+  })
+
+  it('repairs a nonsense lineEnding instead of writing it back to a file', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: SCHEMA_VERSION,
+        buffer: { name: 'a.py', content: 'x\n', lineEnding: '\n\n', bom: 'yes' },
+      }),
+    )
+
+    expect(load(storage).state.buffer).toMatchObject({ lineEnding: '\n', bom: false })
+  })
+})
+
+describe('schema v1 migration', () => {
+  /** Exactly what the step-2 build wrote: no lineEnding, no bom. */
+  const V1_PAYLOAD = JSON.stringify({
+    version: 1,
+    buffer: {
+      name: 'lesson.py',
+      content: 'def f():\n\treturn 1\n',
+      cursor: { anchor: 4, head: 9 },
+    },
+    settings: { theme: 'light', fontSize: 20 },
+  })
+
+  it('loads v1 data unchanged, filling in the v2 defaults', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(STORAGE_KEY, V1_PAYLOAD)
+
+    const { state, problem } = load(storage, { now: FIXED_NOW })
+
+    expect(problem).toBeUndefined()
+    expect(state).toEqual({
+      version: SCHEMA_VERSION,
+      buffer: {
+        name: 'lesson.py',
+        content: 'def f():\n\treturn 1\n',
+        cursor: { anchor: 4, head: 9 },
+        lineEnding: '\n',
+        bom: false,
+      },
+      settings: { theme: 'light', fontSize: 20 },
+    })
+  })
+
+  it('does not back up or rewrite the key while migrating', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(STORAGE_KEY, V1_PAYLOAD)
+
+    load(storage, { now: FIXED_NOW })
+
+    expect(storage.items.size).toBe(1)
+    expect(storage.items.get(STORAGE_KEY)).toBe(V1_PAYLOAD)
+  })
+
+  it('writes v2 back the next time the buffer is saved', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(STORAGE_KEY, V1_PAYLOAD)
+
+    const { state } = load(storage)
+    save(storage, state)
+
+    const stored: unknown = JSON.parse(storage.items.get(STORAGE_KEY) ?? 'null')
+    expect(stored).toMatchObject({ version: 2, buffer: { lineEnding: '\n', bom: false } })
+  })
+
+  it('repairs a v1 payload with a broken buffer the same way v2 is repaired', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(STORAGE_KEY, JSON.stringify({ version: 1, buffer: 'nope' }))
+
+    const { state, problem } = load(storage)
+
+    expect(problem).toBeUndefined()
+    expect(state.buffer.content).toBe('')
+    expect(state.buffer.name).toBe(DEFAULT_NAME)
   })
 })
 
@@ -160,7 +268,7 @@ describe('cursor clamping', () => {
 describe('corrupt or unknown payloads', () => {
   it('backs up unparseable JSON and leaves the original key untouched', () => {
     const storage = new MemoryStorage()
-    const raw = '{"version":1,"buffer":{"content":"precious'
+    const raw = '{"version":2,"buffer":{"content":"precious'
     storage.items.set(STORAGE_KEY, raw)
 
     const { state, problem } = load(storage, { now: FIXED_NOW })
@@ -175,15 +283,24 @@ describe('corrupt or unknown payloads', () => {
     expect(state.buffer.content).toBe('')
   })
 
-  it('treats an unknown schema version as corrupt rather than guessing', () => {
+  it('treats a newer schema version as corrupt rather than guessing', () => {
     const storage = new MemoryStorage()
-    const raw = JSON.stringify({ version: 2, files: [{ name: 'a.py', content: 'later' }] })
+    // v3 is the planned multi-file schema; this build must not invent a reading.
+    const raw = JSON.stringify({ version: 3, files: [{ name: 'a.py', content: 'later' }] })
     storage.items.set(STORAGE_KEY, raw)
 
-    const { problem } = load(storage, { now: FIXED_NOW })
+    const { raw: loadedRaw, problem } = load(storage, { now: FIXED_NOW })
 
     expect(problem?.kind).toBe('corrupt')
+    expect(loadedRaw).toBeNull()
     expect(storage.items.get(EXPECTED_BACKUP_KEY)).toBe(raw)
+  })
+
+  it('treats a non-numeric version as corrupt', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(STORAGE_KEY, JSON.stringify({ version: '2', buffer: { content: 'x' } }))
+
+    expect(load(storage, { now: FIXED_NOW }).problem?.kind).toBe('corrupt')
   })
 
   it('treats valid JSON of the wrong shape as corrupt', () => {
@@ -225,5 +342,13 @@ describe('save failures', () => {
     storage.setThrows = 'nope' as unknown as Error
 
     expect(save(storage, stateWith(''))).toEqual({ ok: false, message: 'nope' })
+  })
+
+  it('hands back exactly the string it stored', () => {
+    const storage = new MemoryStorage()
+
+    const result = save(storage, stateWith('x = 1\n'))
+
+    expect(result.ok && result.raw).toBe(storage.items.get(STORAGE_KEY))
   })
 })

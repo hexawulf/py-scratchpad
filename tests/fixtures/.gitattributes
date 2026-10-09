@@ -1,0 +1,5 @@
+# These files are byte-exact test data, not source. Their line endings, BOM and
+# missing trailing newline are the thing under test, so git must never convert
+# them — on a Windows checkout core.autocrlf would otherwise rewrite crlf.py and
+# the LF fixtures and the round-trip tests would fail for the wrong reason.
+* -text -diff

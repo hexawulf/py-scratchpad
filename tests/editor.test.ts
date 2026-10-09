@@ -66,11 +66,13 @@ describe('editor and storage together', () => {
         name: 'scratch.py',
         content: state.doc.toString(),
         cursor: { anchor: range.anchor, head: range.head },
+        lineEnding: '\n',
+        bom: false,
       },
       settings: { theme: 'dark', fontSize: 14 },
     }
 
-    expect(save(storage, stored)).toEqual({ ok: true })
+    expect(save(storage, stored).ok).toBe(true)
     const restored = load(storage)
 
     expect(restored.problem).toBeUndefined()
