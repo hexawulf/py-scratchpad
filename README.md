@@ -6,11 +6,16 @@ Syntax highlighting, autosave, import/export, and (later) a Run button powered b
 Everything stays in the browser — no backend, no accounts, no login, no data on the server.
 The deployed site is static files behind nginx.
 
-Public URL: <https://python.piapps.dev>
+Public URL: <https://py-scratchpad.com> (`www` redirects to the apex).
+
+It is also still served at <https://python.piapps.dev>, its original home. Both hostnames
+reach the same container, and neither redirects to the other: your files live in the
+browser's `localStorage`, which is per origin, so anything saved at `python.piapps.dev`
+is only reachable there. Download it and re-open it at the new address.
 
 ## Status
 
-v0.1 is live at <https://python.piapps.dev> (PLAN §9 steps 1-5). Multi-file support (v0.2)
+v0.1 is live at <https://py-scratchpad.com> (PLAN §9 steps 1-5). Multi-file support (v0.2)
 and the Pyodide runner (v0.3) are not built yet. See [docs/PLAN.md](docs/PLAN.md) §9 for the
 build steps and §2 for the feature scope, and [docs/DEPLOY.md](docs/DEPLOY.md) for the
 release and deploy runbook.

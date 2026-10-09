@@ -11,4 +11,4 @@ Separate repo from the parent python-learner; its tutoring rules don't apply her
 - Vanilla TS + Vite + CodeMirror 6. Don't add a UI framework without asking.
 - Pin exact dependency versions; commit package-lock.json.
 - Run `npm run lint && npm test && npm run build` before saying a change is done.
-- Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040, vhost python.piapps.dev on piapps.
+- Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040. Two piapps vhosts proxy it: `py-scratchpad.com` (the public home, apex + www) and `python.piapps.dev` (the original, still serving). No redirect between them — localStorage is per origin, so redirecting the old host would hide code saved there.

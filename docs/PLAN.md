@@ -1,5 +1,5 @@
 ---
-title: py-scratchpad — browser-only Python scratchpad at python.piapps.dev (build plan)
+title: py-scratchpad — browser-only Python scratchpad at py-scratchpad.com (build plan)
 author: 0xWulf
 created: 2026-10-08
 hosts: [piapps2, piapps]
@@ -11,7 +11,7 @@ tags: [homelab, webapp, python, codemirror, pyodide, docker, nginx, cloudflare, 
 
 A small editor to keep open next to a Udemy course. It has syntax highlighting, import/export, autosave, and optionally a **Run** button. Everything stays in the browser: no backend, no accounts, no login, and no data on the server.
 
-Build it with Claude Code + VS Code in a new GitHub repo. Host it on **piapps2** behind **piapps** nginx as `python.piapps.dev`.
+Build it with Claude Code + VS Code in a new GitHub repo. Host it on **piapps2** behind **piapps** nginx. It launched as `python.piapps.dev`; the public home is now `py-scratchpad.com`, with the original hostname still serving (§6.1).
 
 ---
 
@@ -26,7 +26,7 @@ Build it with Claude Code + VS Code in a new GitHub repo. Host it on **piapps2**
 | Compose dir (piapps2) | `/home/zk/bots/py-scratchpad` |
 | Container | `py-scratchpad` |
 | localStorage key | `py-scratchpad:v1` |
-| Public URL | `https://python.piapps.dev` |
+| Public URL | `https://py-scratchpad.com` (+ `www` → apex); also `https://python.piapps.dev` |
 
 ---
 
@@ -207,16 +207,67 @@ container behind a piapps vhost. Kuma is a secondary reference and its WebSocket
 
 Optional: a Cloudflare Access policy or an IP allowlist, if you'd rather not make it public. There is no server-side data, so public is low risk.
 
+### 6.1 Domain move to py-scratchpad.com — done 2026-10-09
+
+The public home became **`https://py-scratchpad.com`** (apex, with `www` 301ing to it) later the
+same day. `python.piapps.dev` **keeps serving exactly as before, and there is no redirect from
+it**: `localStorage` is scoped per origin, so code saved at the old hostname would be unreachable
+after a redirect. The operational detail lives in `docs/DEPLOY.md` §6; what follows is what this
+step turned up.
+
+- **Second vhost, not a rename.** `/etc/nginx/sites-available/py-scratchpad.com`, copied from
+  `python.piapps.dev`, with the `www` → apex redirect structured as in `doubletrees.app`
+  (a separate `443` server block) rather than the `if ($host = ...)` of `linuxsvr.org`.
+  Source of truth is now in the repo at `docs/nginx/py-scratchpad.com` — `python.piapps.dev`
+  has no such file.
+- **Correction to §6's certificate story.** That section is right that `python.piapps.dev` needs
+  no certificate work, but the new host is **not** on the wildcard. It got its own ECDSA P-256
+  cert, SAN apex + `www`, expiring 2027-01-07, issued by **HTTP-01 `webroot`** — the method
+  `containeryard.org`, `snippetmate.com` and `linuxsvr.org` use. DNS-01 was the first plan and
+  was dropped: the certbot credential in `/root/.secrets/certbot/cloudflare.ini` is a **scoped
+  token with access to `piapps.dev` only** (`GET /zones` returns exactly that one zone), so it
+  cannot answer a DNS challenge for the new domain. Nothing in this step read or wrote that file,
+  which matters because `piapps.dev-0001` renewed from it the next day.
+- **Order is load-bearing.** The cert must exist before any `443` block names it, so the vhost
+  went in as **port 80 only** first, the challenge path was proved end to end through Cloudflare,
+  then certbot ran, then the `443` blocks were added. Two installs, two reloads.
+- **Every redirect sits in a `location /`, never at server level.** nginx runs a server-level
+  `return 301` in the server-rewrite phase, *before* location selection, which makes
+  `location ^~ /.well-known/acme-challenge/` unreachable in that block. Measured on piapps:
+  `containeryard.org` answers `200` for an existing challenge file, while `doubletrees.app`,
+  `snippetmate.com` and `linuxsvr.org` answer `301`. Those three still renew — Let's Encrypt
+  follows redirects and their `443` blocks (or, for `doubletrees.app`, the `nginx` authenticator)
+  serve the token; both dry-runs passed. So it is survivable, not fatal. This vhost does not rely
+  on the rescue: the ACME snippet is in all three blocks.
+- **Cloudflare.** The zone was already active with apex, `www` and a wildcard `*` A record, all
+  proxied to `122.116.150.249` — byte-identical to the `python` record on `piapps.dev` except
+  that `www` is an A record rather than a CNAME, which is the same style the reference uses.
+  Two settings differed from `piapps.dev` and were corrected operator-side: **SSL `full` →
+  `strict`** and **Always Use HTTPS `off` → `on`**. `rocket_loader`, all three `minify` flags and
+  bot JS (`fight_mode`, `enable_js`) were already off, matching the reference.
+- **Web Analytics is absent for this zone**, not merely disabled. The account has 10 RUM sites
+  with `auto_install: true`, including `piapps.dev`; `py-scratchpad.com` is not among them. So the
+  beacon-injection risk that §6 guards against with a sha256 check cannot arise here by
+  configuration. The check stays anyway, and it passed: public and origin `index.html` are
+  identical on both hostnames.
+- **Open:** the wildcard `*.py-scratchpad.com` record has no vhost and no SAN coverage, so unused
+  subdomains return 525; and a later small release should show a one-line "moved to
+  py-scratchpad.com — download your files first" notice when served at `python.piapps.dev`
+  (`src/notice.ts` is already the mechanism).
+
 ---
 
 ## 7. Monitoring and docs
 
 - Uptime Kuma: **done 2026-10-09** — monitor id 60, name `py-scratchpad`, type **keyword**,
-  URL `https://python.piapps.dev`, keyword `py-scratchpad` (it is the `<title>`), interval 60 s,
+  URL `https://python.piapps.dev` (**repointed to `https://py-scratchpad.com` later the same day,
+  see §6.1**), keyword `py-scratchpad` (it is the `<title>`), interval 60 s,
   retry 60 s, 2 retries, resend 30, accepted `200-299`, notification 1 `SIGINT → hexawulf`, no parent
   group. Field-for-field a copy of the `pitasker` / `netdata` monitors. First heartbeat:
   `UP — 200 - OK, keyword is found`. See [[uptime-kuma-piapps2]].
-  Note: `kuma-push-provision.py` could not be used — it is push-only.
+  Note: `kuma-push-provision.py` could not be used — it is push-only. The later URL change was
+  made with a one-off script on the same socket.io pattern (`getMonitor` 60 → replace `url` →
+  `editMonitor`), run inside the container and deleted afterwards.
 - Update [[sigint-piapps2-cronjobs-reference]] only if a cron gets added (none is planned, none added).
 - **Done 2026-10-09:** the vault note's `status:` is `live`, and the service, port and vhost are in the
   hexawulf-homelab skill (`references/hosts-detail.md` piapps2 container list and
@@ -237,7 +288,7 @@ Browser-only Python scratchpad served as static files. No backend, no accounts, 
 - Vanilla TS + Vite + CodeMirror 6. Don't add a UI framework without asking.
 - Pin exact dependency versions; commit package-lock.json.
 - Run `npm run lint && npm test && npm run build` before saying a change is done.
-- Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040, vhost python.piapps.dev on piapps.
+- Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040, vhosts py-scratchpad.com and python.piapps.dev on piapps.
 ```
 
 ---
@@ -248,7 +299,7 @@ Browser-only Python scratchpad served as static files. No backend, no accounts, 
 2. **Editor + autosave:** one buffer, theme toggle, font size. Check by reloading the page: the code is still there.
 3. **Import/export:** Open, drag-drop, Download, `Ctrl+S`. Round-trip a `.py` file and diff it against the original: it must be identical, including the trailing newline and tabs vs spaces.
 4. **Docker + deploy to piapps2:** curl the LAN port.
-5. **Ingress + DNS** (approval gate): browse `https://python.piapps.dev`, and add the Kuma monitor. **v0.1 is done here.** — **done 2026-10-09** (§6, §7; no cert and no DNS change were needed).
+5. **Ingress + DNS** (approval gate): browse the public URL, and add the Kuma monitor. **v0.1 is done here.** — **done 2026-10-09** (§6, §7; for `python.piapps.dev` no cert and no DNS change were needed). The move to `py-scratchpad.com` followed the same day (§6.1) and *did* need a cert of its own.
 6. **v0.2 multi-file + zip export.**
 7. **v0.3 Pyodide:** worker runner, Stop, output panel; then the `input()` bridge with COOP/COEP.
 
@@ -261,7 +312,7 @@ Each step ends with a commit and a manual check in the browser.
 - [ ] Type code, close the tab, reopen: the code is still there.
 - [ ] Open a `.py` file, edit, download: the content round-trips exactly.
 - [ ] `Ctrl+S` downloads the file and does not show the browser's save-page dialog.
-- [ ] The DevTools Network tab shows no requests to any host other than `python.piapps.dev`.
+- [ ] The DevTools Network tab shows no requests to any host other than the one serving the page (`py-scratchpad.com`, or `python.piapps.dev`).
 - [ ] The DevTools console shows no CSP violations.
 - [ ] It works in Vivaldi/Opera/Chromium and Firefox on linuxsvr, and side by side with a Udemy tab (narrow window ≈ 600 px).
 - [ ] v0.3: `while True: pass` → Stop recovers within 1 s; `input("name? ")` works; tracebacks show line numbers.
