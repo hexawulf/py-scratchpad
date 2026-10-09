@@ -1,7 +1,7 @@
 {
   "name": "py-scratchpad",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Browser-only Python scratchpad: CodeMirror 6 editor, localStorage autosave, no backend.",
   "license": "MIT",
@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:image": "bash scripts/e2e-image.sh"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

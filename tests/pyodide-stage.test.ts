@@ -155,6 +155,40 @@ describe('nginx serves the runtime the way the browser needs it', () => {
     )
   })
 
+  /**
+   * 0.3.0 shipped broken because `.mjs` is not in nginx's `mime.types`, so
+   * `pyodide.mjs` arrived as `application/octet-stream` and the browser
+   * refused to execute it as a module — every Run failed with "Failed to fetch
+   * dynamically imported module". `vite preview` types it correctly, so the
+   * browser suite passed. These two tests are the config-level guard; the real
+   * one is `npm run test:e2e:image`, which runs the browser against nginx.
+   */
+  it('asserts a Content-Type for every extension the runtime loads', () => {
+    // Which extensions are actually staged, so a future Pyodide version that
+    // ships a new one fails here rather than in a browser.
+    const extensions = new Set(
+      PYODIDE_RUNTIME_FILES.map((name) => /\.[^.]+$/.exec(name)?.[0] ?? ''),
+    )
+    expect([...extensions].sort()).toEqual(['.json', '.mjs', '.wasm', '.zip'])
+
+    // The two that nginx cannot look up get an explicit default_type.
+    expect(NGINX).toMatch(/location ~ \^\/pyodide\/\.\+\\\.wasm\$[\s\S]*?default_type application\/wasm/)
+    expect(NGINX).toMatch(/location ~ \^\/pyodide\/\.\+\\\.mjs\$[\s\S]*?default_type text\/javascript/)
+    // And the extensionless licence is readable rather than a download.
+    expect(NGINX).toMatch(/location \/pyodide\/ \{[\s\S]*?default_type text\/plain/)
+  })
+
+  it('runs the browser suite against the image, not only against vite preview', () => {
+    const playwright = read('playwright.config.ts')
+    const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
+
+    expect(pkg.scripts['test:e2e:image']).toBeDefined()
+    expect(playwright).toContain('PY_SCRATCHPAD_BASE_URL')
+    // The override must also switch the built-in preview server off, or
+    // Playwright would start one and test that instead.
+    expect(playwright).toContain('OWN_SERVER')
+  })
+
   it('gives the .wasm its own location with an asserted content type', () => {
     // application/octet-stream makes instantiateStreaming refuse the module.
     expect(NGINX).toMatch(/location ~ \^\/pyodide\/\.\+\\\.wasm\$/)

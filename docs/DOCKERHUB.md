@@ -25,7 +25,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.1.2
+  -p 8080:80 0xwulf/py-scratchpad:0.3.1
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -38,7 +38,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.1.2
+  0xwulf/py-scratchpad:0.3.1
 ```
 
 ## Docker Compose
@@ -46,7 +46,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.1.2 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.1 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -73,7 +73,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.1.2`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.1`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -134,8 +134,12 @@ Do not add your own copies of these two headers at the proxy — a duplicate
 
 The runtime is served under `/pyodide/<version>/`, which is immutable
 (`Cache-Control: public, max-age=31536000, immutable`) because the version is
-in the path. The `.wasm` is sent as `application/wasm`, which
-`WebAssembly.instantiateStreaming` requires.
+in the path. Three of its Content-Types are asserted by the image rather than
+looked up, because a browser rejects any of them being wrong: `.wasm` as
+`application/wasm` (`WebAssembly.instantiateStreaming` requires it) and the two
+`.mjs` files as `text/javascript` (a module script needs a JavaScript MIME
+type, and `.mjs` is not in nginx's `mime.types` — this is what 0.3.0 got
+wrong).
 
 ## Container details
 
@@ -185,6 +189,13 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.1** — fixes a 0.3.0 release bug that broke **every** Run on a deployed
+  container. `pyodide.mjs` and `pyodide.asm.mjs` were served as
+  `application/octet-stream`, because `.mjs` is not in nginx's `mime.types`,
+  and a browser refuses to execute a module script that does not arrive with a
+  JavaScript MIME type: the Run button reported *"Failed to fetch dynamically
+  imported module"*. Both are now sent as `text/javascript`, and `LICENSE` as
+  `text/plain`. If you are on 0.3.0, upgrade. Nothing else changed in the app.
 - **0.3.0** — **a Run button.** The buffer is executed by Pyodide 314.0.7
   (CPython 3.14.2) in a Web Worker, with an output panel below the editor:
   stdout, stderr and tracebacks that carry your filename and your line numbers,

@@ -100,6 +100,23 @@ Run button is what the editor was wanted for, and the single buffer is what v0.3
   DOM at once. Output is coalesced in the worker by size *and* elapsed time (the worker is
   blocked inside synchronous Python, so no timer of its own can fire) and appended to the DOM
   on an animation frame.
+- **Correction 6 — `.mjs` is not in nginx's `mime.types`, and that broke 0.3.0 in production.**
+  `pyodide.mjs` and `pyodide.asm.mjs` were served as `application/octet-stream`, and a browser
+  refuses to execute a module script that does not arrive with a JavaScript MIME type — so
+  every Run failed with *"Failed to fetch dynamically imported module"*. The whole test suite
+  passed, because `vite preview` is a Vite dev server and types `.mjs` correctly while nginx
+  does not: **no test ran the browser against nginx.** Fixed in 0.3.1 with a `.mjs` location
+  carrying an empty `types { }` plus `default_type text/javascript` (the same shape the
+  `.wasm` already used), and guarded by `npm run test:e2e:image`, which builds the image, runs
+  it read-only, asserts all six Content-Types and points the browser suite at nginx. Both the
+  unit guard and the image guard were verified to fail when the location is removed.
+- **Correction 7 — the Cloudflare beacon check has to use browser headers.** §6.1 below claims
+  Web Analytics is absent for the `py-scratchpad.com` zone. On 2026-10-09 headless Chrome
+  reported `static.cloudflareinsights.com/beacon.min.js` blocked by CSP on **both** hostnames,
+  while all three bare-`curl` sha256 hashes matched. Cloudflare's HTML rewriter only acts on
+  browser-shaped requests, so the curl-based guard in `docs/DEPLOY.md` §6.4 is blind to it.
+  The CSP does block the script, so nothing third-party executes — but the HTML is modified
+  in flight. Operator action: turn `auto_install` off for both zones. **Not** a CSP change.
 - **Added: the runtime is staged, not vendored into git.** `build/pyodide.ts` copies the five
   files the core runtime needs out of `node_modules/pyodide` into `dist/pyodide/<version>/`,
   with Pyodide's MPL-2.0 licence beside them, and serves the same files out of `node_modules`
@@ -303,11 +320,16 @@ step turned up.
   Two settings differed from `piapps.dev` and were corrected operator-side: **SSL `full` →
   `strict`** and **Always Use HTTPS `off` → `on`**. `rocket_loader`, all three `minify` flags and
   bot JS (`fight_mode`, `enable_js`) were already off, matching the reference.
-- **Web Analytics is absent for this zone**, not merely disabled. The account has 10 RUM sites
-  with `auto_install: true`, including `piapps.dev`; `py-scratchpad.com` is not among them. So the
-  beacon-injection risk that §6 guards against with a sha256 check cannot arise here by
-  configuration. The check stays anyway, and it passed: public and origin `index.html` are
-  identical on both hostnames.
+- ~~**Web Analytics is absent for this zone**, not merely disabled.~~ **Wrong, corrected
+  2026-10-09 during the 0.3.0 release.** The claim rested on a bare-`curl` sha256 comparison,
+  which Cloudflare's HTML rewriter does not act on: it only injects for browser-shaped
+  requests. Headless Chrome reports
+  `static.cloudflareinsights.com/beacon.min.js` **blocked by CSP on both hostnames**, and a
+  `curl` carrying a browser `User-Agent` and `Accept` header finds the beacon in the HTML
+  while a bare one does not. So the beacon-injection risk is live on this zone too. Nothing
+  third-party executes — `script-src 'self'` stops it — but the page is being rewritten.
+  The guard in `docs/DEPLOY.md` §6.4 now sends browser headers. **Open, operator action:**
+  turn `auto_install` off for `py-scratchpad.com` and `piapps.dev`.
 - **Open:** the wildcard `*.py-scratchpad.com` record has no vhost and no SAN coverage, so unused
   subdomains return 525; and a later small release should show a one-line "moved to
   py-scratchpad.com — download your files first" notice when served at `python.piapps.dev`

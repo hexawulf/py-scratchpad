@@ -88,7 +88,14 @@ npm run preview      # serve the built dist/ locally
 npm run lint         # eslint
 npm test             # vitest units, including the Python runner in Pyodide under Node
 npm run test:e2e     # one headless-Chromium smoke test against npm run preview
+npm run test:e2e:image  # the same suite against the built container image (nginx)
 ```
+
+`npm run test:e2e:image` is the one that catches a serving mistake: `vite preview` is a Vite
+dev server and types `.mjs` as JavaScript, while nginx has no `.mjs` mapping at all. 0.3.0
+shipped with `pyodide.mjs` served as `application/octet-stream`, which a browser refuses to
+execute as a module, and `npm run test:e2e` passed anyway. Run it before any release and
+after any change to `docker/nginx.conf`.
 
 `npm run dev` and `npm run preview` both send `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp`, the two headers that make the page cross-origin

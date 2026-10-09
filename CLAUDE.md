@@ -12,7 +12,7 @@ Separate repo from the parent python-learner; its tutoring rules don't apply her
 - The Pyodide runtime is **never committed**: `build/pyodide.ts` stages it from `node_modules` into `dist/pyodide/<version>/` at build time, with `vendor/pyodide/LICENSE` beside it. The version in the path is what makes each URL immutable. v0.3 is **stdlib only** — no `micropip`, no `loadPackage`, no package ever fetched.
 - `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` are load-bearing, not hardening: they give the page `SharedArrayBuffer`, which Stop's interrupt buffer and the synchronous `input()` bridge are built on. They live in `docker/security-headers.conf` and in the Vite plugin's dev/preview middleware, so dev behaves like prod. Everything must still work without them — that is the Program-input fallback.
 - Pin exact dependency versions; commit package-lock.json.
-- Run `npm run lint && npm test && npm run build` before saying a change is done.
+- Run `npm run lint && npm test && npm run build` before saying a change is done. Anything touching `docker/nginx.conf`, the staged runtime files or the headers also needs `npm run test:e2e:image` — `vite preview` types `.mjs` as JavaScript and nginx does not, which is how 0.3.0 shipped with every Run broken.
 - Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040. Two piapps vhosts proxy it: `py-scratchpad.com` (the public home, apex + www) and `python.piapps.dev` (the original, still serving). No redirect between them — localStorage is per origin, so redirecting the old host would hide code saved there.
 
 ## House rules

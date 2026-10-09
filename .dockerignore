@@ -23,3 +23,6 @@ docs
 playwright.config.ts
 test-results
 playwright-report
+
+# Dev scripts — not needed to produce dist/
+scripts

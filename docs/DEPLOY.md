@@ -58,6 +58,25 @@ npm run test:e2e
 the only check that the worker actually starts under the real CSP and that the
 page is cross-origin isolated, so it is worth having locally before tagging.
 
+**1.1a Run the same suite against the image.** This is not optional for a
+release and `ci.yml` does not do it:
+
+```
+npm run test:e2e:image
+```
+
+It builds the image, runs it read-only as piapps2 does, asserts the
+Content-Type of all six runtime files, and runs the browser suite against
+**nginx** rather than against `vite preview`.
+
+Why it exists: `vite preview` is a Vite dev server and types `.mjs` as
+JavaScript, while **nginx has no `.mjs` mapping at all**. 0.3.0 shipped with
+`pyodide.mjs` served as `application/octet-stream`, which a browser refuses to
+execute as a module script, so every Run failed with *"Failed to fetch
+dynamically imported module"* — and `npm run test:e2e` passed the whole way.
+Anything that changes `docker/nginx.conf`, the staged runtime file list, or the
+headers has to go through this check.
+
 **1.1b Prove the build is reproducible.** The About dialog's build date comes
 from the last commit, not the clock, so two builds of one commit must be
 identical:
@@ -189,14 +208,26 @@ curl -sI -H 'Accept-Encoding: gzip' "http://192.168.50.120:5040${V}pyodide.asm.w
 for f in pyodide.mjs pyodide-lock.json pyodide.asm.mjs pyodide.asm.wasm python_stdlib.zip LICENSE ; do printf '%-20s ' "$f" ; curl -s -o /dev/null -w '%{http_code}\n' "http://192.168.50.120:5040${V}${f}" ; done
 ```
 
-Expected:
+Expected — **and the `type=` of every file matters, not just the wasm's**:
 
-- the `.wasm` → `200`, **`Content-Type: application/wasm`** (anything else and
-  `WebAssembly.instantiateStreaming` refuses it) and
-  `Cache-Control: public, max-age=31536000, immutable`.
+| file | Content-Type | why it matters |
+|---|---|---|
+| `pyodide.mjs` | `text/javascript` | the worker `import()`s it; a non-JS type and the browser refuses to execute it |
+| `pyodide.asm.mjs` | `text/javascript` | same, imported by Pyodide from `indexURL` |
+| `pyodide.asm.wasm` | `application/wasm` | `instantiateStreaming` refuses anything else |
+| `pyodide-lock.json` | `application/json` | from `mime.types` |
+| `python_stdlib.zip` | `application/zip` | from `mime.types` |
+| `LICENSE` | `text/plain` | cosmetic; it is for humans |
+
+Neither `.mjs` nor the extensionless `LICENSE` is in nginx's `mime.types`, so
+each is asserted by its own location in `docker/nginx.conf` with an **empty**
+`types { }` plus `default_type`. **0.3.0 shipped with both `.mjs` files as
+`application/octet-stream` and every Run broken.** `npm run test:e2e:image`
+(§1.1a) is what now catches that before a tag exists.
+
+- all six → `200`, `Cache-Control: public, max-age=31536000, immutable`.
 - `Content-Encoding: gzip` on the second call — 9.6 MB becomes about 3.5 MB.
-- all six files → `200`. Five are the runtime; `LICENSE` is Pyodide's MPL-2.0,
-  which has to travel with them.
+- `LICENSE` is Pyodide's MPL-2.0, which has to travel with the files it covers.
 
 The version in `$V` must match `pyodide` in `package.json` for the release
 being deployed. The path is immutable by construction, so a version bump
@@ -466,17 +497,30 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   ```
   H=$(curl -sI https://py-scratchpad.com/) ; for h in content-security-policy x-content-type-options referrer-policy cache-control cross-origin-opener-policy cross-origin-embedder-policy ; do printf '%-32s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done
   ```
-- **Prove Cloudflare is not rewriting the page.** The `piapps.dev` zone has Web Analytics with
-  `auto_install: true`, which *could* inject `static.cloudflareinsights.com/beacon.min.js` — that
-  would break the no-CDN rule and trip `script-src 'self'`. The `py-scratchpad.com` zone is **not
-  registered for Web Analytics at all**, so it has no such setting to go wrong; check both anyway:
+- **Prove Cloudflare is not rewriting the page — and do it with browser headers.**
+  Web Analytics `auto_install` injects `static.cloudflareinsights.com/beacon.min.js` into
+  proxied HTML, which breaks the no-CDN rule and trips `script-src 'self'`.
+
+  **A plain `curl` cannot see it.** Cloudflare's HTML rewriter only acts on browser-shaped
+  requests, so the bare three-way `sha256sum` below passes while a real browser is served an
+  injected page. Measured on 2026-10-09: all three bare-curl hashes matched on both
+  hostnames, yet headless Chrome reported the beacon blocked by CSP on both.
   ```
   curl -s https://py-scratchpad.com/ | sha256sum
   curl -s https://python.piapps.dev/ | sha256sum
   ssh piapps 'curl -s http://192.168.50.120:5040/ | sha256sum'
   ```
-  All three must match. If one ever diverges, turn auto-install off for that zone — **do not**
-  widen the CSP to accommodate it.
+  Necessary but not sufficient. **Send browser headers too**, which is what exposes it:
+  ```
+  UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36'
+  AC='text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+  for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | grep -c cloudflareinsights ; done
+  ```
+  Both must print `0`. A `1` means that zone has Web Analytics with `auto_install: true`;
+  the fix is to turn auto-install off in the Cloudflare dashboard for that zone — **never**
+  to widen the CSP to accommodate it. The CSP does block the script, so nothing third-party
+  executes either way, but the HTML is being modified in flight and that is not acceptable
+  for a page whose whole claim is that it loads only from its own origin.
 - `curl -sI http://py-scratchpad.com` returns 301 from the **Cloudflare edge** once
   `always_use_https` is on, so it does not prove the origin. For that, ask the origin directly:
   ```
