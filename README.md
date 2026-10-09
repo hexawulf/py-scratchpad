@@ -6,13 +6,14 @@ Syntax highlighting, autosave, import/export, and (later) a Run button powered b
 Everything stays in the browser — no backend, no accounts, no login, no data on the server.
 The deployed site is static files behind nginx.
 
-Public URL (once deployed): <https://python.piapps.dev>
+Public URL: <https://python.piapps.dev>
 
 ## Status
 
-v0.1 in progress. The editor, autosave and import/export are done (PLAN §9 steps 1-3);
-Docker, ingress and the Pyodide runner are not. See [docs/PLAN.md](docs/PLAN.md) §9 for the
-build steps and §2 for the feature scope.
+v0.1 is live at <https://python.piapps.dev> (PLAN §9 steps 1-5). Multi-file support (v0.2)
+and the Pyodide runner (v0.3) are not built yet. See [docs/PLAN.md](docs/PLAN.md) §9 for the
+build steps and §2 for the feature scope, and [docs/DEPLOY.md](docs/DEPLOY.md) for the
+release and deploy runbook.
 
 What works today:
 
@@ -22,6 +23,8 @@ What works today:
   `Ctrl+S`/`Cmd+S`, writes it back **byte for byte** — line endings, UTF-8 BOM, tabs and a
   missing trailing newline all survive the round trip.
 - An editable filename field, dark/light theme and A-/A+ font size, all persisted.
+- An **About dialog** behind the toolbar's ⓘ button: version and build month, the exact stack
+  versions, links, and a one-line diagnostics string with a Copy button for bug reports.
 - A second tab writing the same key pauses autosave here and offers Reload or Keep mine,
   instead of one tab silently overwriting the other. While it is paused with unsaved edits,
   closing or reloading the tab asks for confirmation first.
@@ -47,13 +50,16 @@ npm run preview      # serve the built dist/ locally
 ```
 index.html          page shell
 src/main.ts         bootstrap, wires the UI
+src/about.ts        About content: version, stack, links, diagnostics (no DOM)
+src/aboutdialog.ts  the About <dialog>: markup, open/close, Copy
 src/editor.ts       CodeMirror setup: extensions, theme and font compartments
 src/storage.ts      localStorage load/save, schema version + migration
 src/files.ts        import/export: decode, encode, line endings, BOM, filenames
 src/tabsync.ts      multi-tab guard: what to do when another tab writes
+src/globals.d.ts    the build-time constants Vite's define injects
 src/style.css       styles
 tests/              vitest units; tests/fixtures/ are the round-trip samples
-vite.config.ts      build config
+vite.config.ts      build config, including the __BUILD_INFO__ define
 public/             static assets copied verbatim into dist/
 docs/PLAN.md        full build plan (scope, stack, deploy, acceptance checks)
 CLAUDE.md           project rules for Claude Code sessions

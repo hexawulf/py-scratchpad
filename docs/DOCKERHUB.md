@@ -17,7 +17,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.1.0
+  -p 8080:80 0xwulf/py-scratchpad:0.1.1
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -30,7 +30,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.1.0
+  0xwulf/py-scratchpad:0.1.1
 ```
 
 ## Docker Compose
@@ -38,7 +38,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.1.0 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.1.1 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -65,7 +65,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.1.0`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.1.1`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -78,8 +78,8 @@ you. If you run a tag-watcher such as watchtower, exclude this container.
   multi-arch manifest.
 - Images are built and pushed by
   [GitHub Actions](https://github.com/hexawulf/py-scratchpad/actions/workflows/release.yml)
-  from GPG-signed git tags, only after lint, the test suite and the production
-  build pass on that tag. The workflow refuses to publish if the tag and
+  from version tags, only after lint, the test suite and the production build
+  pass on that tag. The workflow refuses to publish if the tag and
   `package.json`'s version disagree.
 - Each image carries **SBOM** and **SLSA provenance** attestations:
   `docker buildx imagetools inspect 0xwulf/py-scratchpad:latest --format '{{ json .Provenance }}'`
@@ -102,8 +102,8 @@ you. If you run a tag-watcher such as watchtower, exclude this container.
 files over HTTP/1.1 — no WebSockets, no server-sent events, no buffering
 quirks. The one thing to get right is to **pass the container's response
 headers through unchanged** and not add your own `Content-Security-Policy` or
-`Cache-Control` at the proxy, or you will end up with duplicates that browsers
-resolve to the most restrictive value.
+`Cache-Control` at the proxy, or the response arrives with duplicate or
+conflicting headers.
 
 ## Security
 
@@ -116,15 +116,21 @@ resolve to the most restrictive value.
   GitHub if you want to read it.
 - **Read-only root filesystem supported** (see above). The nginx entrypoint
   detects it and skips its config rewrite instead of failing.
-- `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` on every
-  response, including error pages.
+- **Two more headers on every response, including error pages:**
+  `X-Content-Type-Options: nosniff`, so a response is never re-typed by
+  content sniffing, and `Referrer-Policy: no-referrer`, so no URL of yours is
+  passed to a site you follow a link to.
 - **No SPA fallback:** an unknown path returns a real `404`, and error
   responses are sent `Cache-Control: no-store` so a miss is never cached.
-- The container writes no files, opens no outbound connections and runs fine
-  with `--network` restricted to its published port.
+- The container writes no files of its own and makes no outbound connections:
+  it answers requests on port `80` and does nothing else.
 
 ## Changelog
 
+- **0.1.1** — adds an About dialog: the version and build month, the exact
+  stack versions, contact and links, and a one-line diagnostics string with a
+  Copy button to paste into a bug report. The line carries no buffer content
+  and no filename.
 - **0.1.0** — first release. CodeMirror 6 editor with Python highlighting,
   `localStorage` autosave that survives a reload, byte-exact `.py` import and
   export (drag-and-drop, `Ctrl+S`), a multi-tab guard, light/dark theme and

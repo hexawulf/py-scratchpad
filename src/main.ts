@@ -1,5 +1,7 @@
 import './style.css'
 
+import type { RuntimeDiagnostics } from './about.ts'
+import { createAboutDialog } from './aboutdialog.ts'
 import { createEditor, type EditorHandle } from './editor.ts'
 import {
   type DecodedFile,
@@ -48,6 +50,8 @@ root.innerHTML = `
         <button type="button" id="font-larger" title="Larger text">A+</button>
       </span>
       <button type="button" id="theme-toggle" class="theme-toggle"></button>
+      <button type="button" id="about-open" class="icon-button" aria-label="About"
+              title="About" aria-haspopup="dialog"><span aria-hidden="true">&#9432;</span></button>
     </header>
     <div id="editor" class="editor"></div>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden>
@@ -79,6 +83,7 @@ const downloadButton = must<HTMLButtonElement>('#download')
 const themeButton = must<HTMLButtonElement>('#theme-toggle')
 const smallerButton = must<HTMLButtonElement>('#font-smaller')
 const largerButton = must<HTMLButtonElement>('#font-larger')
+const aboutButton = must<HTMLButtonElement>('#about-open')
 
 /**
  * `window.localStorage` itself throws when site data is blocked, so even
@@ -524,6 +529,21 @@ smallerButton.addEventListener('click', () => {
 largerButton.addEventListener('click', () => {
   stepFontSize(1)
 })
+
+// ---------------------------------------------------------------------------
+// About
+// ---------------------------------------------------------------------------
+
+function aboutDiagnostics(): RuntimeDiagnostics {
+  return {
+    storage: storageAvailable ? 'localStorage' : 'in-memory',
+    autosavePaused: conflictPending,
+    theme,
+    online: window.navigator.onLine,
+  }
+}
+
+createAboutDialog({ opener: aboutButton, diagnostics: aboutDiagnostics })
 
 if (!storageAvailable) {
   showNotice('This browser is blocking site data, so nothing will be saved on reload.', 'error')

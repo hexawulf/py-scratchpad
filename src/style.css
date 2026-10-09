@@ -207,3 +207,188 @@ button:disabled {
     margin-left: 0;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * About dialog
+ * ------------------------------------------------------------------------ */
+
+/* Round icon button in the toolbar, like stocky's ⓘ / ⚙ pair. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.9rem;
+  min-width: 0;
+  height: 1.9rem;
+  padding: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border-color: transparent;
+  border-radius: 50%;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+/*
+ * The <dialog> is the backdrop's anchor and nothing else: no padding and no
+ * border, so .about-card fills it exactly. That is what lets a click whose
+ * target is the dialog mean "the backdrop was clicked" (aboutdialog.ts).
+ */
+.about {
+  width: calc(100% - 2rem);
+  max-width: 34rem;
+  max-height: calc(100dvh - 3rem);
+  padding: 0;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+}
+
+.about::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.about-card {
+  max-height: calc(100dvh - 3rem);
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.2rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.about-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.about h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.about-tagline {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.about-close {
+  flex: none;
+  width: 2rem;
+  min-width: 0;
+  height: 2rem;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: var(--surface);
+  border-radius: 50%;
+}
+
+.about-version {
+  margin: 0.7rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.about h3 {
+  margin: 1rem 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.about-stack {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.8rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.about-stack dt {
+  font-weight: 600;
+}
+
+.about-stack dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.about-contact {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.about-links {
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  list-style: none;
+}
+
+.about-links li + li {
+  margin-top: 0.15rem;
+}
+
+.about a {
+  color: var(--accent);
+}
+
+.about-diag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.about-diag-line {
+  flex: 1 1 15rem;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  overflow-wrap: anywhere;
+  /* One click selects the whole line, which is what the Ctrl+C hint asks for. */
+  user-select: all;
+}
+
+/* Pill, like stocky's secondary button. */
+.about-copy {
+  flex: none;
+  padding: 0.3rem 0.95rem;
+  border-radius: 999px;
+}
+
+.about-copied {
+  /* Reserve the line, so the card does not jump when the feedback appears. */
+  min-height: 1.15rem;
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* Very narrow: stack the label above its value instead of squeezing both. */
+@media (max-width: 24rem) {
+  .about-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .about-stack dd {
+    margin-bottom: 0.3rem;
+  }
+}
