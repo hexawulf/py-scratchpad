@@ -258,10 +258,18 @@ trailing newline, and non-ASCII text. `tests/roundtrip.test.ts` runs each one th
 path — bytes, decode, a real CodeMirror document, encode, bytes — because the normalisation that
 breaks a round trip happens inside the editor, not in `files.ts`.
 
-To check the same thing by hand, open each fixture in the browser, click Download, then:
+To check the same thing by hand, open each fixture in the browser, click Download, then run this
+from the repository root (adjust `$HOME/Downloads` if your browser saves elsewhere):
 
 ```bash
-cd /home/zk/projects/python/py-scratchpad && for f in tests/fixtures/*.py; do n=$(basename "$f"); cmp -s "$f" "$HOME/Downloads/$n" && echo "IDENTICAL $n" || echo "DIFFERS   $n"; done
+for f in tests/fixtures/*.py; do
+  n=$(basename "$f")
+  if cmp -s "$f" "$HOME/Downloads/$n"; then
+    echo "IDENTICAL $n"
+  else
+    echo "DIFFERS   $n"
+  fi
+done
 ```
 
 ## License
