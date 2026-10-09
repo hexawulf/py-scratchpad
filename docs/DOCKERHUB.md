@@ -21,11 +21,13 @@ server-side Python here at all.
 
 Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.com/hexawulf/py-scratchpad)**
 
+![The py-scratchpad editor on its dark theme in REPL echo mode: bare arithmetic expressions, a celsius() function and a for loop in the buffer, with the output panel below showing the echoed values and the loop's printed lines.](https://raw.githubusercontent.com/hexawulf/py-scratchpad/main/docs/screenshots/run-dark.png)
+
 ## Quick start
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.1
+  -p 8080:80 0xwulf/py-scratchpad:0.3.2
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -38,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.1
+  0xwulf/py-scratchpad:0.3.2
 ```
 
 ## Docker Compose
@@ -46,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.1 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.2 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -73,7 +75,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.1`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.2`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -133,7 +135,8 @@ Do not add your own copies of these two headers at the proxy — a duplicate
 `Cross-Origin-Embedder-Policy` is as broken as a missing one.
 
 The runtime is served under `/pyodide/<version>/`, which is immutable
-(`Cache-Control: public, max-age=31536000, immutable`) because the version is
+(`Cache-Control: public, max-age=31536000, immutable, no-transform`) because the
+version is
 in the path. Three of its Content-Types are asserted by the image rather than
 looked up, because a browser rejects any of them being wrong: `.wasm` as
 `application/wasm` (`WebAssembly.instantiateStreaming` requires it) and the two
@@ -183,12 +186,19 @@ conflicting headers.
   content sniffing, and `Referrer-Policy: no-referrer`, so no URL of yours is
   passed to a site you follow a link to.
 - **No SPA fallback:** an unknown path returns a real `404`, and error
-  responses are sent `Cache-Control: no-store` so a miss is never cached.
+  responses are sent `Cache-Control: no-store, no-transform` so a miss is never
+  cached.
 - The container writes no files of its own and makes no outbound connections:
   it answers requests on port `80` and does nothing else.
 
 ## Changelog
 
+- **0.3.2** — `no-transform` on every `Cache-Control` the container sends. Cloudflare Web
+  Analytics was injecting a beacon script into the HTML of both hostnames; a bare `curl` could
+  not see it, because the rewriter only acts on browser-shaped requests, which is how 0.3.0 and
+  0.3.1 shipped believing the page was untouched. HTTP says an intermediary must not modify a
+  payload sent with `Cache-Control: no-transform`, so no response from this image is
+  transformable any more. Nothing else changed in the app.
 - **0.3.1** — fixes a 0.3.0 release bug that broke **every** Run on a deployed
   container. `pyodide.mjs` and `pyodide.asm.mjs` were served as
   `application/octet-stream`, because `.mjs` is not in nginx's `mime.types`,

@@ -15,7 +15,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:image": "bash scripts/e2e-image.sh"
+    "test:e2e:image": "bash scripts/e2e-image.sh",
+    "screenshots": "playwright test --config=playwright.screenshots.config.ts"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
