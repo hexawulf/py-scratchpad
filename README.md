@@ -1,6 +1,9 @@
 # py-scratchpad
 
-[![CI](https://github.com/hexawulf/py-scratchpad/actions/workflows/ci.yml/badge.svg)](https://github.com/hexawulf/py-scratchpad/actions/workflows/ci.yml)
+[![CI](https://github.com/hexawulf/py-scratchpad/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hexawulf/py-scratchpad/actions/workflows/ci.yml)
+[![Docker Hub version](https://img.shields.io/docker/v/0xwulf/py-scratchpad?sort=semver&label=docker)](https://hub.docker.com/r/0xwulf/py-scratchpad)
+[![Docker Hub pulls](https://img.shields.io/docker/pulls/0xwulf/py-scratchpad)](https://hub.docker.com/r/0xwulf/py-scratchpad)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A browser-only Python scratchpad: a small editor to keep open next to a course video, with
 syntax highlighting, autosave, byte-exact import/export, and a **Run** button that runs real
