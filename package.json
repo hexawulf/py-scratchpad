@@ -1,7 +1,7 @@
 {
   "name": "py-scratchpad",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "Browser-only Python scratchpad: CodeMirror 6 editor, localStorage autosave, no backend.",
   "license": "MIT",

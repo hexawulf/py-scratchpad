@@ -217,6 +217,8 @@ py-scratchpad/
   - Hashed assets (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`.
     `/pyodide/<version>/*` likewise — the version is in the path, so each URL is immutable.
     `index.html`: `no-cache`.
+  - **Every one of those also carries `no-transform` since 0.3.2**, which is an
+    anti-rewriting directive rather than a caching one — see §6.1.
   - gzip covers js/css/wasm/json. The 9.6 MB `.wasm` gzips to 3.5 MB; serving five of those
     concurrently under the 64 MB `mem_limit` measured 13.8 MiB.
 - **Verify on piapps2:**
@@ -328,8 +330,23 @@ step turned up.
   `curl` carrying a browser `User-Agent` and `Accept` header finds the beacon in the HTML
   while a bare one does not. So the beacon-injection risk is live on this zone too. Nothing
   third-party executes — `script-src 'self'` stops it — but the page is being rewritten.
-  The guard in `docs/DEPLOY.md` §6.4 now sends browser headers. **Open, operator action:**
-  turn `auto_install` off for `py-scratchpad.com` and `piapps.dev`.
+  The guard in `docs/DEPLOY.md` §6.4 now sends browser headers.
+- **`no-transform` is the primary guard — fixed in 0.3.2, 2026-10-09.** The rewriting is
+  stopped at the edge by the response itself rather than by a dashboard setting: HTTP says an
+  intermediary must not modify a payload sent with `Cache-Control: no-transform`, so **every**
+  `Cache-Control` in `docker/nginx.conf` now carries it (`no-cache, no-transform` on the entry
+  document, `public, max-age=31536000, immutable, no-transform` on `/assets/*` and
+  `/pyodide/*`, `no-store, no-transform` on the 404 path, `public, max-age=3600, no-transform`
+  on the unhashed public files). No response is left transformable. It ships in the image, so
+  it covers both hostnames and any future vhost without anyone touching Cloudflare.
+  `tests/pyodide-stage.test.ts` asserts it per location and `npm run test:e2e:image` reads it
+  back off real nginx — the config-level test alone would not have caught it, exactly as with
+  the `.mjs` type in 0.3.0. Measured before: `beacon=1` on both hostnames with a
+  browser-shaped request. After: `beacon=0` on both, and the browser-shaped response hashes
+  equal to the origin.
+  The CSP is now explicitly the **second** line of defence and is not to be widened.
+  **Still open, operator action (tidiness, no longer load-bearing):** turn `auto_install` off
+  for `py-scratchpad.com` and `piapps.dev`.
 - **Open:** the wildcard `*.py-scratchpad.com` record has no vhost and no SAN coverage, so unused
   subdomains return 525; and a later small release should show a one-line "moved to
   py-scratchpad.com — download your files first" notice when served at `python.piapps.dev`

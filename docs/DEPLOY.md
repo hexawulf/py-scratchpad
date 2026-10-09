@@ -180,14 +180,14 @@ curl -s -o /dev/null -w 'status=%{http_code}\n' http://192.168.50.120:5040/does-
 
 Expected:
 
-- `/` → `200`, `Cache-Control: no-cache`, plus `Content-Security-Policy`,
+- `/` → `200`, `Cache-Control: no-cache, no-transform`, plus `Content-Security-Policy`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and — since
   0.3.0 — `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
 - the title is `py-scratchpad` (Uptime Kuma matches on this keyword).
-- a path that does not exist → `404`, `Cache-Control: no-store`. There is no
+- a path that does not exist → `404`, `Cache-Control: no-store, no-transform`. There is no
   SPA fallback, so a `200` here means the config regressed.
-- the hashed `/assets/*` file → `200`, `Cache-Control: public, max-age=31536000, immutable`.
+- the hashed `/assets/*` file → `200`, `Cache-Control: public, max-age=31536000, immutable, no-transform`.
 - `/assets/*.js.map` → `404`. Source maps are off in `vite.config.ts`: the
   repo is public, so a map hides nothing, and it would add about 2 MB to every
   deploy for no benefit. A `200` here means they were switched back on.
@@ -225,7 +225,7 @@ each is asserted by its own location in `docker/nginx.conf` with an **empty**
 `application/octet-stream` and every Run broken.** `npm run test:e2e:image`
 (§1.1a) is what now catches that before a tag exists.
 
-- all six → `200`, `Cache-Control: public, max-age=31536000, immutable`.
+- all six → `200`, `Cache-Control: public, max-age=31536000, immutable, no-transform`.
 - `Content-Encoding: gzip` on the second call — 9.6 MB becomes about 3.5 MB.
 - `LICENSE` is Pyodide's MPL-2.0, which has to travel with the files it covers.
 
@@ -482,9 +482,10 @@ curl -sI https://py-scratchpad.com/assets/<hashed>.js
 curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exist
 ```
 
-- apex `/` → `200`, `cache-control: no-cache`; `www/` → `301` to the apex;
-  `/assets/*` → `200`, `public, max-age=31536000, immutable`; `*.js.map` and an unknown path →
-  `404`, `no-store`.
+- apex `/` → `200`, `cache-control: no-cache, no-transform`; `www/` → `301` to the apex;
+  `/assets/*` → `200`, `public, max-age=31536000, immutable, no-transform`; `*.js.map` and an
+  unknown path → `404`, `no-store, no-transform`. **Every one of them carries `no-transform`**
+  — that is the anti-rewriting guard, not a caching detail; see the Cloudflare bullet below.
 - the certificate, per name:
   ```
   echo | openssl s_client -connect 192.168.50.102:443 -servername py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
@@ -501,26 +502,42 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   Web Analytics `auto_install` injects `static.cloudflareinsights.com/beacon.min.js` into
   proxied HTML, which breaks the no-CDN rule and trips `script-src 'self'`.
 
-  **A plain `curl` cannot see it.** Cloudflare's HTML rewriter only acts on browser-shaped
-  requests, so the bare three-way `sha256sum` below passes while a real browser is served an
-  injected page. Measured on 2026-10-09: all three bare-curl hashes matched on both
-  hostnames, yet headless Chrome reported the beacon blocked by CSP on both.
-  ```
-  curl -s https://py-scratchpad.com/ | sha256sum
-  curl -s https://python.piapps.dev/ | sha256sum
-  ssh piapps 'curl -s http://192.168.50.120:5040/ | sha256sum'
-  ```
-  Necessary but not sufficient. **Send browser headers too**, which is what exposes it:
+  **`no-transform` on `Cache-Control` is the primary guard, since 0.3.2.** A proxy must not
+  modify a payload sent with it, so the rewriter stops at the edge without anything being
+  changed in a dashboard. Every `Cache-Control` the container sends carries it — the entry
+  document as `no-cache, no-transform`, `/assets/*` and `/pyodide/*` as
+  `public, max-age=31536000, immutable, no-transform`, the 404 path as
+  `no-store, no-transform`, the unhashed public files as `public, max-age=3600, no-transform`
+  — so no response is left transformable. `docker/nginx.conf` holds it,
+  `tests/pyodide-stage.test.ts` asserts it per location and `npm run test:e2e:image` reads it
+  back off the real nginx. Turning `auto_install` off for the zone is still the tidier
+  dashboard-side fix and remains open; it is no longer what the page depends on.
+
+  Widening the CSP is **never** the fix. The CSP is the second line — it blocks the script
+  from executing — and must stay as narrow as it is.
+
+  **A plain `curl` cannot see the injection.** Cloudflare's HTML rewriter only acts on
+  browser-shaped requests, so the bare three-way `sha256sum` below passed on 2026-10-09 on
+  both hostnames while headless Chrome reported the beacon blocked by CSP on both. So the
+  check that matters carries a browser `User-Agent` and `Accept`:
   ```
   UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36'
   AC='text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
   for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | grep -c cloudflareinsights ; done
   ```
-  Both must print `0`. A `1` means that zone has Web Analytics with `auto_install: true`;
-  the fix is to turn auto-install off in the Cloudflare dashboard for that zone — **never**
-  to widen the CSP to accommodate it. The CSP does block the script, so nothing third-party
-  executes either way, but the HTML is being modified in flight and that is not acceptable
-  for a page whose whole claim is that it loads only from its own origin.
+  Both must print `0`. A `1` with `no-transform` present on the response means the edge is
+  ignoring the directive — report that and stop; do not reach for the CSP.
+
+  Then hash the **browser-shaped** response against the origin, not the bare one:
+  ```
+  for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | sha256sum ; done
+  ssh piapps 'curl -s http://192.168.50.120:5040/ | sha256sum'
+  ```
+  All three hashes must match. And confirm the directive actually arrives:
+  ```
+  for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -sI "$u" | grep -i '^cache-control:' ; done
+  ```
+  Both must read `no-cache, no-transform`.
 - `curl -sI http://py-scratchpad.com` returns 301 from the **Cloudflare edge** once
   `always_use_https` is on, so it does not prove the origin. For that, ask the origin directly:
   ```

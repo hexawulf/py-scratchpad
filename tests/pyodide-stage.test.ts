@@ -151,7 +151,7 @@ describe('the dev middleware that serves them out of node_modules', () => {
 describe('nginx serves the runtime the way the browser needs it', () => {
   it('caches /pyodide/ for a year, because the version is in the path', () => {
     expect(NGINX).toMatch(
-      /location \/pyodide\/ \{[\s\S]*?Cache-Control "public, max-age=31536000, immutable"/,
+      /location \/pyodide\/ \{[\s\S]*?Cache-Control "public, max-age=31536000, immutable, no-transform"/,
     )
   })
 
@@ -214,6 +214,70 @@ describe('nginx serves the runtime the way the browser needs it', () => {
         'include /etc/nginx/snippets/security-headers.conf;',
       )
     }
+  })
+})
+
+/**
+ * Cloudflare Web Analytics with `auto_install` rewrites proxied HTML to add
+ * `static.cloudflareinsights.com/beacon.min.js`, and it does so only for
+ * browser-shaped requests — so a bare `curl` comparison against the origin
+ * says the page is untouched while a real browser is served an injected one.
+ * That is how 0.3.0 was released believing the zone was clean.
+ *
+ * `no-transform` is the documented way to tell an intermediary not to modify
+ * the payload, so it is the primary guard: it lives in our config, travels
+ * with the image and needs nothing set in anyone's dashboard. The CSP is the
+ * second line — it stops the injected script from executing — and it is
+ * deliberately not widened to accommodate the beacon.
+ */
+describe('no proxy may rewrite what we send', () => {
+  /** Every `add_header Cache-Control "<value>"` in the config, in file order. */
+  const cacheControls = [...NGINX.matchAll(/add_header Cache-Control "([^"]+)"/g)].map(
+    (m) => m[1],
+  )
+
+  it('carries no-transform on every Cache-Control, leaving no path to transform', () => {
+    expect(cacheControls.length).toBeGreaterThanOrEqual(8)
+    for (const value of cacheControls) {
+      expect(value, value).toContain('no-transform')
+    }
+  })
+
+  it('carries it on the HTML, which is the response the rewriter targets', () => {
+    // Both entry-document locations: `= /` and `= /index.html`.
+    expect(NGINX).toMatch(
+      /location = \/ \{[\s\S]*?Cache-Control "no-cache, no-transform" always;/,
+    )
+    expect(NGINX).toMatch(
+      /location = \/index\.html \{[\s\S]*?Cache-Control "no-cache, no-transform" always;/,
+    )
+    // no-cache has to stay: the document names the current hashed assets.
+    for (const value of cacheControls.filter((v) => v.startsWith('no-cache'))) {
+      expect(value).toBe('no-cache, no-transform')
+    }
+  })
+
+  it('keeps it on the 404 path and on the unhashed public files too', () => {
+    expect(NGINX).toMatch(/location @notfound \{[\s\S]*?Cache-Control "no-store, no-transform"/)
+    expect(NGINX).toMatch(/location \/ \{[\s\S]*?Cache-Control "public, max-age=3600, no-transform"/)
+  })
+
+  it('keeps it on the year-long immutable responses', () => {
+    const immutable = cacheControls.filter((v) => v.includes('immutable'))
+    expect(immutable.length).toBe(4) // /assets/ plus the three /pyodide/ locations
+    for (const value of immutable) {
+      expect(value).toBe('public, max-age=31536000, immutable, no-transform')
+    }
+  })
+
+  it('does not widen the CSP to let the injected beacon run instead', () => {
+    expect(HEADERS).not.toContain('cloudflareinsights')
+    expect(HEADERS).not.toContain('static.cloudflareinsights.com')
+  })
+
+  it('is asserted against the real image, not only against this config', () => {
+    const script = read('scripts/e2e-image.sh')
+    expect(script).toContain('no-transform')
   })
 })
 

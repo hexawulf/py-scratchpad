@@ -100,6 +100,47 @@ EXPECTED
 
 [ "${status}" -eq 0 ] || exit 1
 
+# `no-transform` is what stops Cloudflare's HTML rewriter from injecting its
+# Web Analytics beacon into the page, so it has to come out of the real nginx
+# and not merely out of docker/nginx.conf. The HTML is the response the
+# rewriter targets; the rest are checked so no path is left transformable.
+say "checking Cache-Control carries no-transform"
+status=0
+while read -r path expected; do
+    [ -n "${path}" ] || continue
+    got="$(curl -s -o /dev/null -D - "${BASE_URL}${path}" | grep -i '^cache-control:' | tr -d '\r' | sed 's/^[Cc]ache-[Cc]ontrol: *//')"
+    if [ "${got}" = "${expected}" ]; then
+        printf '  %-28s %s\n' "${path}" "${got}" | tee -a "${LOG}"
+    else
+        fail "${path}: expected Cache-Control '${expected}', got '${got}'"
+        status=1
+    fi
+done <<EXPECTED
+/ no-cache, no-transform
+/index.html no-cache, no-transform
+/favicon.svg public, max-age=3600, no-transform
+/does-not-exist no-store, no-transform
+/pyodide/${VERSION}/pyodide.mjs public, max-age=31536000, immutable, no-transform
+EXPECTED
+
+# The hashed bundle, whose name is only knowable from the page itself.
+asset="$(curl -s "${BASE_URL}/" | grep -o '/assets/[^"]*\.js' | head -n1)"
+if [ -z "${asset}" ]; then
+    fail "could not find a hashed /assets/*.js in the page"
+    status=1
+else
+    got="$(curl -s -o /dev/null -D - "${BASE_URL}${asset}" | grep -i '^cache-control:' | tr -d '\r' | sed 's/^[Cc]ache-[Cc]ontrol: *//')"
+    expected='public, max-age=31536000, immutable, no-transform'
+    if [ "${got}" = "${expected}" ]; then
+        printf '  %-28s %s\n' "${asset}" "${got}" | tee -a "${LOG}"
+    else
+        fail "${asset}: expected Cache-Control '${expected}', got '${got}'"
+        status=1
+    fi
+fi
+
+[ "${status}" -eq 0 ] || exit 1
+
 say "running the smoke test against the image"
 PY_SCRATCHPAD_BASE_URL="${BASE_URL}" npx playwright test "$@" 2>&1 | tee -a "${LOG}"
 
