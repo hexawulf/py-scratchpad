@@ -1,0 +1,39 @@
+# py-scratchpad on piapps2. Locally built image, so watchtower must skip it.
+#
+# The port is bound to the piapps2 LAN address only (192.168.50.120, the eth0
+# address — never .179/wlan0). piapps nginx proxies to it; nothing else should
+# reach the container.
+#
+# read_only: the nginx entrypoint tolerates a read-only rootfs (its
+# 10-listen-on-ipv6-by-default.sh test-writes default.conf and skips when that
+# fails), so only nginx's own writable paths need a tmpfs.
+
+services:
+  py-scratchpad:
+    build:
+      context: .
+    image: py-scratchpad:local
+    container_name: py-scratchpad
+    restart: unless-stopped
+    ports:
+      - "192.168.50.120:5040:80"
+    mem_limit: 64m
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    healthcheck:
+      # busybox wget, already in the nginx alpine image.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - com.centurylinklabs.watchtower.enable=false

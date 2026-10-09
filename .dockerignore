@@ -1,0 +1,20 @@
+# Nothing listed here is needed to produce dist/.
+# Note: tests/ is excluded, so `npm run build` (tsc && vite build) type-checks
+# src/ and the config files only. tsconfig.json still lists "tests" in include,
+# which is harmless when the directory is absent.
+
+.git
+.gitattributes
+.gitignore
+.dockerignore
+node_modules
+dist
+dist-ssr
+tests
+docs
+*.md
+.github
+.vscode
+.idea
+*.log
+*.local

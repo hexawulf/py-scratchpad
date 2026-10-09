@@ -5,8 +5,10 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   base: '/',
   build: {
+    // No source maps in the published build: the repo is private, and a .map
+    // ships the full TypeScript source to anyone who loads the page.
+    sourcemap: false,
     target: 'es2022',
-    sourcemap: true,
   },
   server: {
     host: '127.0.0.1',
