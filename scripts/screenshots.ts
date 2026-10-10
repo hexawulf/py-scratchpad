@@ -1,5 +1,6 @@
 /**
- * Takes the README's screenshots, reproducibly.
+ * Takes the README's screenshots, and the site's link-preview image,
+ * reproducibly.
  *
  *     npm run build && npm run screenshots
  *
@@ -35,6 +36,14 @@ import { expect, test, type Page } from '@playwright/test'
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)))
 const OUT_DIR = join(REPO, 'docs', 'screenshots')
+
+/**
+ * The Open Graph image is served by the site itself, so it lands in public/
+ * rather than docs/. 1200x630 at 1x is the size Facebook, LinkedIn, Mastodon
+ * and X all crop to without rescaling.
+ */
+const OG_IMAGE = join(REPO, 'public', 'og-image.png')
+const OG_SIZE = { width: 1200, height: 630 }
 
 const STORAGE_KEY = 'py-scratchpad:v1'
 
@@ -210,10 +219,9 @@ async function openScratchpad(page: Page, theme: 'dark' | 'light'): Promise<void
     .toBe(theme)
 }
 
-/** Capture the viewport into `docs/screenshots/<name>`, then squeeze the PNG. */
-async function capture(page: Page, name: string): Promise<void> {
-  mkdirSync(OUT_DIR, { recursive: true })
-  const path = join(OUT_DIR, name)
+/** Capture the viewport into `path`, then squeeze the PNG. */
+async function capture(page: Page, path: string): Promise<void> {
+  mkdirSync(dirname(path), { recursive: true })
   // Playwright hides the text caret by default, so no blinking cursor is
   // frozen into the image.
   await page.screenshot({ path })
@@ -253,7 +261,7 @@ test.describe('dark', () => {
       if (active instanceof HTMLElement) active.blur()
     })
 
-    await capture(page, 'run-dark.png')
+    await capture(page, join(OUT_DIR, 'run-dark.png'))
   })
 })
 
@@ -284,6 +292,31 @@ test.describe('light', () => {
     await expect(prompt).toHaveText('width:')
     await expect(page.locator('#output-log')).toContainText('Rectangle area')
 
-    await capture(page, 'input-light.png')
+    await capture(page, join(OUT_DIR, 'input-light.png'))
+  })
+})
+
+/**
+ * The link preview: the same REPL-echo run as run-dark.png, at the Open Graph
+ * size and 1x, since a preview is shown far smaller than it is captured.
+ */
+test.describe('og-image', () => {
+  test.use({ colorScheme: 'dark', viewport: OG_SIZE, deviceScaleFactor: 1 })
+
+  test('og-image.png — the link preview', async ({ page }) => {
+    await openScratchpad(page, 'dark')
+    await page.locator('#filename').fill('hello.py')
+    await page.locator('#run-mode').selectOption('repl')
+    await typeSource(page, RUN_SOURCE)
+
+    await page.locator('#run').click()
+    await expect(page.locator('#output-status')).toHaveText(/^Done /)
+
+    await page.evaluate(() => {
+      const active = document.activeElement
+      if (active instanceof HTMLElement) active.blur()
+    })
+
+    await capture(page, OG_IMAGE)
   })
 })

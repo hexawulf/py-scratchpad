@@ -19,6 +19,18 @@ describe('search engines see one canonical page', () => {
     expect(INDEX).toContain(`<meta property="og:url" content="${ORIGIN}" />`)
   })
 
+  it('has a link-preview image that exists, at the size it claims', () => {
+    expect(INDEX).toContain(`<meta property="og:image" content="${ORIGIN}og-image.png" />`)
+    expect(INDEX).toContain('<meta name="twitter:card" content="summary_large_image" />')
+
+    // A PNG's IHDR chunk holds its width and height at bytes 16-23.
+    const png = readFileSync(new URL('../public/og-image.png', import.meta.url))
+    expect(png.readUInt32BE(16)).toBe(1200)
+    expect(png.readUInt32BE(20)).toBe(630)
+    expect(INDEX).toContain('<meta property="og:image:width" content="1200" />')
+    expect(INDEX).toContain('<meta property="og:image:height" content="630" />')
+  })
+
   it('has a descriptive title and a description of a useful length', () => {
     const title = /<title>([^<]+)<\/title>/.exec(INDEX)?.[1] ?? ''
     expect(title).toMatch(/python/i)
