@@ -16,7 +16,7 @@
 
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.3
+    image: 0xwulf/py-scratchpad:0.3.4
     container_name: py-scratchpad
     restart: unless-stopped
     ports:

@@ -184,7 +184,8 @@ Expected:
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and — since
   0.3.0 — `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
-- the title is `py-scratchpad` (Uptime Kuma matches on this keyword).
+- the title contains `py-scratchpad` (Uptime Kuma matches on this keyword); since 0.3.4 it
+  reads `py-scratchpad — run Python in your browser, no install`.
 - a path that does not exist → `404`, `Cache-Control: no-store, no-transform`. There is no
   SPA fallback, so a `200` here means the config regressed.
 - the hashed `/assets/*` file → `200`, `Cache-Control: public, max-age=31536000, immutable, no-transform`.

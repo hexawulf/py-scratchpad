@@ -27,7 +27,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.3
+  -p 8080:80 0xwulf/py-scratchpad:0.3.4
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -40,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.3
+  0xwulf/py-scratchpad:0.3.4
 ```
 
 ## Docker Compose
@@ -48,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.3 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.4 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -75,7 +75,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.3`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.4`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -193,6 +193,11 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.4** — search and link-preview metadata; no change to the editor or the runtime. The page
+  names `https://py-scratchpad.com/` as its canonical URL, so the copy still served at
+  `python.piapps.dev` is not indexed as a duplicate, and carries a fuller title and description,
+  Open Graph / Twitter tags with a 1200x630 preview image, and `WebApplication` structured data.
+  New static files: `robots.txt`, `sitemap.xml` and `og-image.png`.
 - **0.3.3** — fixes the `input()` prompt when a program asks more than once. The prompt is
   whatever the program wrote to stdout since the last newline — there is nothing else to read it
   from, since `input("width: ")` is a plain write with no newline followed by a read — but that
