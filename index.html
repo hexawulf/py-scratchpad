@@ -4,11 +4,54 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="description" content="Browser-only Python scratchpad. Your code never leaves this tab." />
-    <title>py-scratchpad</title>
+    <title>py-scratchpad — run Python in your browser, no install</title>
+    <meta name="description" content="Free Python scratchpad that runs in your browser: write and run Python 3 with input() and autosave. No install, no account; your code never leaves the tab." />
+    <!--
+      One canonical URL for search engines. The same image is also served at
+      python.piapps.dev (kept so code saved in that origin's localStorage stays
+      reachable); this tells Google the two are one page and which one to index.
+    -->
+    <link rel="canonical" href="https://py-scratchpad.com/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#282c34" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="py-scratchpad" />
+    <meta property="og:title" content="py-scratchpad — run Python in your browser" />
+    <meta property="og:description" content="Write and run Python 3 in the browser. No install, no account; your code never leaves the tab." />
+    <meta property="og:url" content="https://py-scratchpad.com/" />
+    <meta property="og:locale" content="en_US" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="py-scratchpad — run Python in your browser" />
+    <meta name="twitter:description" content="Write and run Python 3 in the browser. No install, no account; your code never leaves the tab." />
+
+    <!--
+      Structured data for Google. A data block, not a script: the browser never
+      executes it, so the CSP's script-src 'self' does not apply.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "py-scratchpad",
+        "url": "https://py-scratchpad.com/",
+        "description": "A browser-only Python scratchpad: write and run Python 3 with no install and no account. Your code is saved in your browser and never sent to a server.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any (runs in a modern web browser)",
+        "browserRequirements": "Requires JavaScript and WebAssembly",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "license": "https://opensource.org/licenses/MIT",
+        "codeRepository": "https://github.com/hexawulf/py-scratchpad"
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      <h1>py-scratchpad: run Python in your browser</h1>
+      <p>A browser-only Python scratchpad. It needs JavaScript and WebAssembly to run Python; your code never leaves this tab.</p>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

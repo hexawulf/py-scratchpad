@@ -1,0 +1,7 @@
+# py-scratchpad — https://py-scratchpad.com/
+# One page, no private paths. The Pyodide runtime under /pyodide/ stays
+# crawlable: Google renders the page and needs its scripts to do so.
+User-agent: *
+Allow: /
+
+Sitemap: https://py-scratchpad.com/sitemap.xml

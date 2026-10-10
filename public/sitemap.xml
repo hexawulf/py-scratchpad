@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  py-scratchpad is a single page, so the sitemap has a single URL: the
+  canonical home. No <lastmod>: a hand-kept date goes stale, and Google
+  ignores lastmod it cannot trust.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://py-scratchpad.com/</loc>
+  </url>
+</urlset>
