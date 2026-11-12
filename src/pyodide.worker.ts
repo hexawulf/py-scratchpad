@@ -25,10 +25,9 @@
 import type { PyodideInterface } from 'pyodide'
 
 import {
+  createFlushPolicy,
   createOutputLimiter,
   createPromptTracker,
-  FLUSH_MS,
-  shouldFlush,
   TRUNCATED_NOTICE,
 } from './output.ts'
 import type { RunRequest, RunStatus, StartRequest, WorkerEvent, WorkerRequest } from './protocol.ts'
@@ -83,7 +82,7 @@ const decoder = new TextDecoder()
 /** Per-stream pending text, flushed together so interleaving is preserved. */
 let pending: { stream: 'out' | 'err'; text: string }[] = []
 let pendingChars = 0
-let lastFlush = 0
+const flushPolicy = createFlushPolicy()
 /**
  * The prompt the next `input()` will carry, accumulated from stdout. See
  * `createPromptTracker`: the rule is the text since the last newline *or* the
@@ -96,7 +95,7 @@ function flushOutput(): void {
   const batch = pending
   pending = []
   pendingChars = 0
-  lastFlush = performance.now()
+  flushPolicy.flushed(performance.now())
 
   const id = current?.id ?? 0
   for (const chunk of batch) {
@@ -129,7 +128,7 @@ function emit(stream: 'out' | 'err', text: string): void {
     return
   }
 
-  if (shouldFlush(pendingChars, performance.now() - lastFlush)) flushOutput()
+  if (flushPolicy.onWrite(pendingChars, performance.now())) flushOutput()
 }
 
 /**
@@ -250,7 +249,7 @@ function execute(request: RunRequest): void {
   pending = []
   pendingChars = 0
   promptTracker.reset()
-  lastFlush = performance.now() - FLUSH_MS
+  flushPolicy.reset(performance.now())
   nextQueuedLine = stdin === null ? createLineQueue(request.inputLines) : null
   if (stdin !== null) resetStdin(stdin)
 

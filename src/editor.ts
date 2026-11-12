@@ -79,8 +79,11 @@ export interface EditorOptions {
   cursor: CursorState
   theme: ThemeName
   fontSize: number
-  /** Fired on every document or selection change; debounce in the caller. */
-  onChange: () => void
+  /**
+   * Fired on every document or selection change; debounce in the caller.
+   * `docChanged` is false when only the caret or the selection moved.
+   */
+  onChange: (docChanged: boolean) => void
   /** Ctrl+Enter / Cmd+Enter inside the editor. */
   onRun: () => void
 }
@@ -110,7 +113,7 @@ export function createEditor(options: EditorOptions): EditorHandle {
       themeCompartment.of(themeExtension(options.theme)),
       fontSizeCompartment.of(fontSizeExtension(options.fontSize)),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged || update.selectionSet) options.onChange()
+        if (update.docChanged || update.selectionSet) options.onChange(update.docChanged)
       }),
     ],
   })

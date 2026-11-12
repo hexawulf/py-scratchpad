@@ -10,9 +10,11 @@
  *    worker, in the message queue and in the DOM at once.
  *  - **The batching.** One `postMessage` and one DOM write per `print` is what
  *    makes a loop of ten thousand prints take seconds instead of milliseconds.
- *    The worker coalesces by size *and* by elapsed time, because it is blocked
- *    inside synchronous Python the whole time a run lasts — no timer of its
- *    own can fire, so the check has to happen on the write itself.
+ *    The worker is blocked inside synchronous Python the whole time a run
+ *    lasts — no timer of its own can fire — so the decision has to be made on
+ *    the write itself. The first few writes of each window go out at once (a
+ *    progress line before a slow loop must not wait for a next write that is
+ *    seconds away); past that it is a burst, coalesced by size and by time.
  *  - **The `line N` references.** A traceback is text, and the only thing that
  *    makes "line 7" clickable is recognising `File "<the buffer>", line 7` in
  *    it — and *only* for this buffer's filename, so a program that prints
@@ -119,6 +121,66 @@ export function createOutputLimiter(limits: OutputLimits = DEFAULT_OUTPUT_LIMITS
 export function shouldFlush(pendingChars: number, msSinceLastFlush: number): boolean {
   if (pendingChars === 0) return false
   return pendingChars >= FLUSH_CHARS || msSinceLastFlush >= FLUSH_MS
+}
+
+/**
+ * How many writes per `FLUSH_MS` window are posted as they arrive. A `print`
+ * is two writes (the text, then the newline), so this is about sixteen lines.
+ */
+export const EAGER_WRITES = 32
+
+export interface FlushPolicy {
+  /** Called on every write, after it was queued: post what is pending now? */
+  onWrite(pendingChars: number, now: number): boolean
+  /** The pending output was posted, by this policy's say-so or otherwise. */
+  flushed(now: number): void
+  /** Start a new run. */
+  reset(now: number): void
+}
+
+/**
+ * When the worker hands over what it has accumulated.
+ *
+ * A program that writes rarely gets every write posted immediately. Without
+ * that, `print("working…")` followed by a minute of arithmetic showed nothing
+ * whenever the print landed within `FLUSH_MS` of the previous post: the text
+ * was queued for a "next write" that only came when the run ended.
+ *
+ * A program that writes in a burst uses up the window's allowance and is then
+ * batched by `shouldFlush`, so a print loop still costs a handful of messages
+ * rather than one per line. What a burst wrote in its last few milliseconds
+ * can still wait for the next write; nothing short of a timer could fix that,
+ * and a blocked thread has none.
+ */
+export function createFlushPolicy(eagerWrites: number = EAGER_WRITES): FlushPolicy {
+  let windowStart = 0
+  let eagerUsed = 0
+  let lastFlush = 0
+
+  return {
+    onWrite(pendingChars, now) {
+      if (pendingChars === 0) return false
+      if (now - windowStart >= FLUSH_MS) {
+        windowStart = now
+        eagerUsed = 0
+      }
+      if (eagerUsed < eagerWrites) {
+        eagerUsed += 1
+        return true
+      }
+      return shouldFlush(pendingChars, now - lastFlush)
+    },
+
+    flushed(now) {
+      lastFlush = now
+    },
+
+    reset(now) {
+      windowStart = now
+      eagerUsed = 0
+      lastFlush = now
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------

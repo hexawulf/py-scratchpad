@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_NAME } from '../src/files.ts'
 import {
+  backupRaw,
   clampCursor,
   clampFontSize,
   DEFAULT_FONT_SIZE,
@@ -9,6 +10,8 @@ import {
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   load,
+  MAX_BACKUPS,
+  parseState,
   save,
   SCHEMA_VERSION,
   STORAGE_KEY,
@@ -292,17 +295,12 @@ describe('corrupt or unknown payloads', () => {
     expect(state.buffer.content).toBe('')
   })
 
-  it('treats a newer schema version as corrupt rather than guessing', () => {
-    const storage = new MemoryStorage()
-    // v4 is the planned multi-file schema; this build must not invent a reading.
-    const raw = JSON.stringify({ version: 4, files: [{ name: 'a.py', content: 'later' }] })
-    storage.items.set(STORAGE_KEY, raw)
-
-    const { raw: loadedRaw, problem } = load(storage, { now: FIXED_NOW })
-
-    expect(problem?.kind).toBe('corrupt')
-    expect(loadedRaw).toBeNull()
-    expect(storage.items.get(EXPECTED_BACKUP_KEY)).toBe(raw)
+  it('treats a version below 1 or a fractional one as corrupt', () => {
+    for (const version of [0, -1, 2.5, Number.NaN]) {
+      const storage = new MemoryStorage()
+      storage.items.set(STORAGE_KEY, JSON.stringify({ version, buffer: { content: 'x' } }))
+      expect(load(storage, { now: FIXED_NOW }).problem?.kind, String(version)).toBe('corrupt')
+    }
   })
 
   it('treats a non-numeric version as corrupt', () => {
@@ -359,5 +357,117 @@ describe('save failures', () => {
     const result = save(storage, stateWith('x = 1\n'))
 
     expect(result.ok && result.raw).toBe(storage.items.get(STORAGE_KEY))
+  })
+})
+
+/** `MemoryStorage` plus the enumeration and removal `localStorage` has. */
+class FullStorage extends MemoryStorage {
+  get length(): number {
+    return this.items.size
+  }
+
+  key(index: number): string | null {
+    return [...this.items.keys()][index] ?? null
+  }
+
+  removeItem(key: string): void {
+    this.items.delete(key)
+  }
+}
+
+describe('data saved by a newer build', () => {
+  // v4 is the planned multi-file schema; this build must not invent a reading.
+  const NEWER = JSON.stringify({ version: 4, files: [{ name: 'a.py', content: 'later' }] })
+
+  it('is left exactly where it is, with no backup copy', () => {
+    const storage = new FullStorage()
+    storage.items.set(STORAGE_KEY, NEWER)
+
+    const { state, raw, problem } = load(storage, { now: FIXED_NOW })
+
+    expect(problem?.kind).toBe('newer')
+    expect(problem).toMatchObject({ version: 4 })
+    expect(problem?.message).toContain('left untouched')
+    expect(raw).toBe(NEWER)
+    expect(storage.items.get(STORAGE_KEY)).toBe(NEWER)
+    expect([...storage.items.keys()]).toEqual([STORAGE_KEY])
+    expect(state.buffer.content).toBe('')
+    expect(state.version).toBe(SCHEMA_VERSION)
+  })
+
+  it('shows the buffer when the newer payload still has one', () => {
+    const storage = new FullStorage()
+    const raw = JSON.stringify({
+      version: 9,
+      buffer: { name: 'kept.py', content: 'x = 1\n', lineEnding: '\r\n', bom: true },
+      settings: { theme: 'light', fontSize: 18, runMode: 'script' },
+      somethingNew: { a: 1 },
+    })
+    storage.items.set(STORAGE_KEY, raw)
+
+    const { state, problem } = load(storage, { now: FIXED_NOW })
+
+    expect(problem?.kind).toBe('newer')
+    expect(state.buffer).toMatchObject({ name: 'kept.py', content: 'x = 1\n', lineEnding: '\r\n', bom: true })
+    expect(state.settings).toEqual({ theme: 'light', fontSize: 18, runMode: 'script' })
+    expect(storage.items.get(STORAGE_KEY)).toBe(raw)
+  })
+
+  it('is not something parseState will read as current data', () => {
+    expect(parseState(NEWER)).toBeNull()
+    expect(parseState('not json')).toBeNull()
+    expect(parseState(JSON.stringify(stateWith('ok')))?.buffer.content).toBe('ok')
+  })
+})
+
+describe('backup copies', () => {
+  const at = (seconds: number): Date => new Date(Date.UTC(2026, 10, 13, 0, 0, seconds))
+
+  it('does not copy the same unreadable value again on the next load', () => {
+    const storage = new FullStorage()
+    storage.items.set(STORAGE_KEY, 'not json')
+
+    const first = load(storage, { now: () => at(1) })
+    const second = load(storage, { now: () => at(2) })
+
+    expect(first.problem).toMatchObject({ kind: 'corrupt' })
+    expect(second.problem).toEqual(first.problem)
+    expect([...storage.items.keys()].filter((key) => key.includes(':corrupt-'))).toHaveLength(1)
+  })
+
+  it('keeps only the newest few, removing the oldest', () => {
+    const storage = new FullStorage()
+    const keys: (string | null)[] = []
+    for (let i = 0; i < MAX_BACKUPS + 3; i += 1) keys.push(backupRaw(storage, `value ${String(i)}`, at(i)))
+
+    const kept = [...storage.items.keys()].sort()
+    expect(kept).toEqual(keys.slice(3))
+    expect(storage.items.get(kept[0] ?? '')).toBe('value 3')
+    expect(storage.items.get(kept[kept.length - 1] ?? '')).toBe(`value ${String(MAX_BACKUPS + 2)}`)
+  })
+
+  it('never removes anything that is not one of its own backups', () => {
+    const storage = new FullStorage()
+    storage.items.set(STORAGE_KEY, 'main')
+    storage.items.set('other-app', 'theirs')
+    storage.items.set(`${STORAGE_KEY}:move-notice`, 'flag')
+    for (let i = 0; i < MAX_BACKUPS + 2; i += 1) backupRaw(storage, `value ${String(i)}`, at(i))
+
+    expect(storage.items.get(STORAGE_KEY)).toBe('main')
+    expect(storage.items.get('other-app')).toBe('theirs')
+    expect(storage.items.get(`${STORAGE_KEY}:move-notice`)).toBe('flag')
+  })
+
+  it('still makes the copy on a storage that cannot list or remove keys', () => {
+    const storage = new MemoryStorage()
+    expect(backupRaw(storage, 'a', at(1))).toBe(`${STORAGE_KEY}:corrupt-2026-11-13T00:00:01.000Z`)
+    expect(backupRaw(storage, 'a', at(2))).toBe(`${STORAGE_KEY}:corrupt-2026-11-13T00:00:02.000Z`)
+    expect(storage.items.size).toBe(2)
+  })
+
+  it('reports a failed copy as null instead of throwing', () => {
+    const storage = new FullStorage()
+    storage.setThrows = new DOMException('quota', 'QuotaExceededError')
+    expect(backupRaw(storage, 'a', at(1))).toBeNull()
   })
 })

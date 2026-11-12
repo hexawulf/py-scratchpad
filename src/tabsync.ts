@@ -18,7 +18,12 @@ export interface StorageEventLike {
   newValue: string | null
 }
 
-export type IgnoreReason = 'other-key' | 'cleared' | 'our-own-write' | 'already-paused'
+export type IgnoreReason =
+  | 'other-key'
+  | 'cleared'
+  | 'our-own-write'
+  | 'same-document'
+  | 'already-paused'
 
 export type SyncDecision = { kind: 'pause' } | { kind: 'ignore'; reason: IgnoreReason }
 
@@ -50,6 +55,37 @@ export function shouldWarnBeforeUnload(inputs: UnloadInputs): boolean {
   return inputs.paused && inputs.dirty
 }
 
+/**
+ * The part of a stored payload that is the user's work: the file as Download
+ * would write it. The caret, the theme, the font size and the run mode are
+ * deliberately left out — autosave writes them too, and a click or a theme
+ * toggle in one tab is not a reason to stop the other from saving.
+ *
+ * Null when the payload cannot be read that way, which callers treat as
+ * "different": an unreadable write is exactly when the user should be asked.
+ */
+function documentOf(raw: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const buffer = (parsed as { buffer?: unknown }).buffer
+  if (typeof buffer !== 'object' || buffer === null) return null
+
+  const { name, content, lineEnding, bom } = buffer as Record<string, unknown>
+  if (typeof content !== 'string') return null
+  return JSON.stringify([name ?? null, content, lineEnding ?? null, bom ?? null])
+}
+
+/** Whether two stored payloads hold the same file name, text and encoding. */
+export function sameDocument(a: string, b: string): boolean {
+  const left = documentOf(a)
+  return left !== null && left === documentOf(b)
+}
+
 export function decideOnExternalWrite(inputs: SyncInputs): SyncDecision {
   const { event, storageKey, lastWritten, paused } = inputs
 
@@ -66,6 +102,12 @@ export function decideOnExternalWrite(inputs: SyncInputs): SyncDecision {
   // Either way, a value byte-identical to ours means nothing has diverged.
   if (lastWritten !== null && event.newValue === lastWritten) {
     return { kind: 'ignore', reason: 'our-own-write' }
+  }
+
+  // The other tab saved a caret move or a setting. The code is the same in
+  // both, so whichever tab writes next loses nothing.
+  if (lastWritten !== null && sameDocument(event.newValue, lastWritten)) {
+    return { kind: 'ignore', reason: 'same-document' }
   }
 
   // Already paused: the notice is up and the user still has to choose. A second

@@ -264,3 +264,112 @@ test('the runtime is served from this origin only', async ({ page }, testInfo) =
   expect(external).toEqual([])
   expect(await outputText(page)).toContain('hi')
 })
+
+// ---------------------------------------------------------------------------
+// 0.3.5: Stop, output timing, two tabs, data from a newer build
+// ---------------------------------------------------------------------------
+
+/** Replace the buffer by typing, without the reload `seed` does. */
+async function typeProgram(page: Page, oneLine: string): Promise<void> {
+  await page.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.type(oneLine)
+}
+
+test('after a forced Stop the fresh interpreter loads and runs', async ({ page }) => {
+  // One C-level loop with no signal check in it, so the interrupt is never
+  // seen and Stop has to terminate the worker.
+  await seed(page, 'print(sum(range(10**11)))\n', 'script')
+
+  const runButton = page.getByRole('button', { name: 'Run', exact: true })
+  await runButton.click()
+  await expect(page.locator('#output-status')).toHaveText('Running…', { timeout: 120_000 })
+
+  await page.getByRole('button', { name: 'Stop' }).click()
+  await expect(page.locator('#output-log')).toContainText('interpreter was restarted', {
+    timeout: 5000,
+  })
+
+  // The replacement shares the interrupt buffer. With SIGINT still in it,
+  // loading runner.py raised KeyboardInterrupt and Python never came back.
+  await typeProgram(page, 'print(6 * 7)')
+  await run(page)
+
+  expect(await outputText(page)).toContain('42')
+  await expect(page.locator('#notice')).toBeHidden()
+  await expect(page.locator('#output-status')).toHaveText(/^Done /)
+})
+
+test('a line printed just before a long computation is shown while it runs', async ({ page }) => {
+  await seed(page, 'print("one")\nprint("two")\nwhile True:\n    pass\n', 'script')
+
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  // Not after the run: the loop never ends. Both lines have to arrive now.
+  await expect(page.locator('#output-log')).toContainText('two', { timeout: 120_000 })
+  await expect(page.locator('#output-status')).toHaveText('Running…')
+
+  await page.getByRole('button', { name: 'Stop' }).click()
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled()
+})
+
+test('a click or a theme toggle in one tab does not pause the other', async ({ page, context }) => {
+  await seed(page, 'print(1)\n')
+  const other = await context.newPage()
+  await other.goto('/')
+  await expect(other.locator('.cm-content')).toContainText('print(1)')
+
+  // Caret move, then a theme toggle: both autosave, neither changes the code.
+  await page.locator('.cm-content').click()
+  await page.keyboard.press('End')
+  await page.locator('#theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+  // The other tab follows the setting and is not interrupted.
+  await expect(other.locator('html')).toHaveAttribute('data-theme', 'light')
+  await expect(other.locator('#notice')).toBeHidden()
+
+  // A real edit is still a conflict.
+  await page.locator('.cm-content').click()
+  await page.keyboard.type('# changed')
+  await expect(other.locator('#notice')).toContainText('Changed in another tab')
+})
+
+test('data saved by a newer version is left alone until the user says otherwise', async ({ page }) => {
+  await page.goto('/')
+  const newer = JSON.stringify({
+    version: 99,
+    buffer: { name: 'later.py', content: 'print("from the future")\n' },
+    somethingNew: [1, 2, 3],
+  })
+  await page.evaluate(
+    ({ key, value }) => {
+      window.localStorage.setItem(key, value)
+    },
+    { key: STORAGE_KEY, value: newer },
+  )
+  await page.reload()
+
+  // Shown, explained, and not overwritten by typing.
+  await expect(page.locator('.cm-content')).toContainText('from the future')
+  await expect(page.locator('#notice')).toContainText('newer py-scratchpad')
+  await page.locator('.cm-content').click()
+  await page.keyboard.type('# mine ')
+  await page.waitForTimeout(800)
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), STORAGE_KEY)).toBe(newer)
+
+  // The way out keeps a copy first.
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.getByRole('button', { name: 'Save here anyway' }).click()
+  await expect(page.locator('#notice')).toContainText('Saving here again')
+
+  const stored = await page.evaluate((key) => {
+    const copies = Object.keys(window.localStorage).filter((name) => name.startsWith(`${key}:corrupt-`))
+    return {
+      main: window.localStorage.getItem(key),
+      copies: copies.map((name) => window.localStorage.getItem(name)),
+    }
+  }, STORAGE_KEY)
+  expect(stored.copies).toEqual([newer])
+  expect(JSON.parse(stored.main ?? '{}')).toMatchObject({ version: SCHEMA_VERSION })
+  expect(stored.main).toContain('# mine')
+})

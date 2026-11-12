@@ -12,10 +12,13 @@ import {
   sanitizeFilename,
 } from './files.ts'
 import {
+  backupRaw,
   clampFontSize,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   load,
+  type LoadProblem,
+  parseState,
   save,
   type ScratchpadState,
   STORAGE_KEY,
@@ -27,6 +30,7 @@ import {
   isTransient,
   MOVE_NOTICE,
   MOVE_NOTICE_DISMISSED_KEY,
+  newerDataNotice,
   type NoticeState,
   type NoticeTone,
   RELOADED_NOTICE,
@@ -114,6 +118,9 @@ root.innerHTML = `
         <button type="button" id="notice-reload">Reload</button>
         <button type="button" id="notice-keep">Keep mine</button>
       </span>
+      <span id="notice-unlock-actions" class="notice-actions" hidden>
+        <button type="button" id="notice-unlock">Save here anyway</button>
+      </span>
       <button type="button" id="notice-dismiss" class="notice-dismiss icon-button"
               aria-label="Dismiss this notice" title="Dismiss" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -139,6 +146,8 @@ const noticeLinkEl = must<HTMLAnchorElement>('#notice-link')
 const noticeDismissButton = must<HTMLButtonElement>('#notice-dismiss')
 const reloadButton = must<HTMLButtonElement>('#notice-reload')
 const keepButton = must<HTMLButtonElement>('#notice-keep')
+const noticeUnlockEl = must<HTMLSpanElement>('#notice-unlock-actions')
+const unlockButton = must<HTMLButtonElement>('#notice-unlock')
 const filenameInput = must<HTMLInputElement>('#filename')
 const fileInput = must<HTMLInputElement>('#file-input')
 const openButton = must<HTMLButtonElement>('#open')
@@ -202,11 +211,19 @@ let fileMeta: FileMeta = {
 
 let noticeTimer: number | undefined
 let saveFailed = false
+/**
+ * Set while the storage key holds a newer build's data (see `load`). Nothing
+ * is written until the user chooses "Save here anyway", because a save from
+ * this build would replace that data with the little of it this build knows.
+ */
+let lockedNotice: NoticeState | null =
+  loaded.problem?.kind === 'newer' ? newerDataNotice(loaded.problem.message) : null
 
 /** Show one of the fixed notices from notice.ts: message, link and actions together. */
 function showNoticeState(state: NoticeState): void {
   noticeTextEl.textContent = state.message
   noticeActionsEl.hidden = !state.actions
+  noticeUnlockEl.hidden = state.unlock !== true
 
   if (state.link === undefined) {
     noticeLinkEl.hidden = true
@@ -231,9 +248,16 @@ function showNotice(message: string, tone: NoticeTone, withActions = false): voi
 }
 
 function hideNotice(): void {
+  // A passing notice ("Opened a.py.") replaced the standing one; put it back,
+  // or the tab would be silently not saving with no button to change that.
+  if (lockedNotice !== null) {
+    showNoticeState(lockedNotice)
+    return
+  }
   noticeEl.hidden = true
   noticeTextEl.textContent = ''
   noticeActionsEl.hidden = true
+  noticeUnlockEl.hidden = true
   noticeLinkEl.hidden = true
   noticeLinkEl.removeAttribute('href')
   noticeLinkEl.textContent = ''
@@ -272,7 +296,9 @@ const editor: EditorHandle = createEditor({
   cursor: loaded.state.buffer.cursor,
   theme,
   fontSize,
-  onChange: scheduleSave,
+  onChange: (docChanged) => {
+    scheduleSave(docChanged)
+  },
   onRun: () => {
     startRun()
   },
@@ -319,8 +345,9 @@ function cancelSaveTimer(): void {
 function flushSave(): void {
   cancelSaveTimer()
   if (!dirty) return
-  // Paused: another tab owns the key until the user picks Reload or Keep mine.
-  if (conflictPending) return
+  // Paused: another tab owns the key until the user picks Reload or Keep mine,
+  // or a newer build's data does until the user picks Save here anyway.
+  if (savingPaused()) return
 
   const result = save(storage, currentState())
   if (result.ok) {
@@ -344,14 +371,26 @@ function flushSaveAndGuard(): void {
   updateUnloadGuard()
 }
 
-function scheduleSave(): void {
+/** True while autosave must not write: a tab conflict, or newer stored data. */
+function savingPaused(): boolean {
+  return conflictPending || lockedNotice !== null
+}
+
+/**
+ * `contentChanged` is false for a caret or selection move. Those are saved
+ * like anything else while autosave runs, but they are not work: while paused
+ * they must not arm the "leave site?" prompt.
+ */
+function scheduleSave(contentChanged = true): void {
   if (applyingState) return
-  dirty = true
-  if (conflictPending) {
+  if (savingPaused()) {
+    if (!contentChanged) return
     // Paused and now dirty: leaving the page would lose this edit.
+    dirty = true
     updateUnloadGuard()
     return
   }
+  dirty = true
   cancelSaveTimer()
   saveTimer = window.setTimeout(flushSave, SAVE_DELAY_MS)
 }
@@ -379,7 +418,7 @@ function warnBeforeUnload(event: BeforeUnloadEvent): void {
 let unloadGuardArmed = false
 
 function updateUnloadGuard(): void {
-  const wanted = shouldWarnBeforeUnload({ paused: conflictPending, dirty })
+  const wanted = shouldWarnBeforeUnload({ paused: savingPaused(), dirty })
   if (wanted === unloadGuardArmed) return
 
   unloadGuardArmed = wanted
@@ -398,13 +437,88 @@ window.addEventListener('storage', (event) => {
     lastWritten,
     paused: conflictPending,
   })
-  if (decision.kind !== 'pause') return
+  if (decision.kind !== 'pause') {
+    if (decision.reason === 'same-document' && event.newValue !== null) {
+      adoptSettings(event.newValue)
+    }
+    return
+  }
 
   conflictPending = true
   cancelSaveTimer()
   updateUnloadGuard()
   showNoticeState(CONFLICT_NOTICE)
 })
+
+/**
+ * The other tab saved the same code with a different theme, font size or run
+ * mode. Follow it: otherwise this tab's next autosave would put its own
+ * settings back, and the two tabs would undo each other on every click.
+ */
+function adoptSettings(raw: string): void {
+  const state = parseState(raw, theme)
+  if (state === null) return
+
+  theme = state.settings.theme
+  fontSize = clampFontSize(state.settings.fontSize)
+  runMode = state.settings.runMode
+  applyTheme()
+  applyFontSize()
+  applyRunMode()
+  editor.setTheme(theme)
+  editor.setFontSize(fontSize)
+}
+
+/** Put a load problem on screen; a `newer` one also stops this tab saving. */
+function showLoadProblem(problem: LoadProblem): void {
+  if (problem.kind === 'newer') {
+    lockedNotice = newerDataNotice(problem.message)
+    showNoticeState(lockedNotice)
+    return
+  }
+  showNotice(problem.message, 'error')
+}
+
+/**
+ * "Save here anyway": copy the newer build's data aside, then let this tab
+ * write. If the copy cannot be made the data is left alone and the tab stays
+ * locked — losing it silently is the one outcome this must not have.
+ */
+function saveHereAnyway(): void {
+  if (lockedNotice === null) return
+  if (
+    !window.confirm(
+      'Replace the newer saved data with what is in this editor? A copy of it is kept in this browser.',
+    )
+  ) {
+    return
+  }
+
+  const backupKey = lastWritten === null ? null : backupRaw(storage, lastWritten, new Date())
+  if (lastWritten !== null && backupKey === null) {
+    lockedNotice = newerDataNotice(
+      'A copy of the newer data could not be made, so it was left alone. Nothing typed here is being saved.',
+    )
+    showNoticeState(lockedNotice)
+    return
+  }
+
+  lockedNotice = null
+  dirty = true
+  hideNotice()
+  flushSaveAndGuard()
+  if (!saveFailed) {
+    showNotice(
+      backupKey === null
+        ? 'Saving here again.'
+        : `Saving here again. The newer data was kept as ${backupKey}.`,
+      'info',
+    )
+  }
+  editor.focus()
+}
+
+unlockButton.addEventListener('click', saveHereAnyway)
 
 /** Take the other tab's version: re-read storage and rebuild everything. */
 function reloadFromStorage(): void {
@@ -431,10 +545,11 @@ function reloadFromStorage(): void {
 
   dirty = false
   conflictPending = false
+  lockedNotice = null
   lastWritten = result.raw
   updateUnloadGuard()
 
-  if (result.problem !== undefined) showNotice(result.problem.message, 'error')
+  if (result.problem !== undefined) showLoadProblem(result.problem)
   else showNoticeState(RELOADED_NOTICE)
   editor.focus()
 }
@@ -921,7 +1036,7 @@ window.addEventListener('keydown', (event) => {
 function aboutDiagnostics(): RuntimeDiagnostics {
   return {
     storage: storageAvailable ? 'localStorage' : 'in-memory',
-    autosavePaused: conflictPending,
+    autosavePaused: savingPaused(),
     theme,
     online: window.navigator.onLine,
     runtime: runtimeInfo,
@@ -941,7 +1056,7 @@ if (shouldShowMoveNotice(window.location.hostname, readSessionFlag(MOVE_NOTICE_D
 if (!storageAvailable) {
   showNotice('This browser is blocking site data, so nothing will be saved on reload.', 'error')
 } else if (loaded.problem !== undefined) {
-  showNotice(loaded.problem.message, 'error')
+  showLoadProblem(loaded.problem)
 }
 
 editor.focus()

@@ -35,7 +35,10 @@ import { isRunMode, type RunMode } from './protocol.ts'
 export const STORAGE_KEY = 'py-scratchpad:v1'
 export const SCHEMA_VERSION = 3
 
-/** Schemas this build can read. Anything else is treated as corrupt. */
+/**
+ * Schemas this build can read. A higher number is a newer build's data and is
+ * left alone (see `load`); anything else is treated as corrupt.
+ */
 const READABLE_VERSIONS: readonly number[] = [1, 2, 3]
 
 export const DEFAULT_FONT_SIZE = 14
@@ -76,16 +79,32 @@ export interface ScratchpadState {
   settings: Settings
 }
 
-/** The slice of the Web Storage API this module needs. */
+/**
+ * The slice of the Web Storage API this module needs. The last three are what
+ * `localStorage` has and a minimal stand-in may not; without them old backup
+ * copies are simply never looked for.
+ */
 export interface StorageLike {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
+  readonly length?: number
+  key?(index: number): string | null
+  removeItem?(key: string): void
 }
+
+/** How many `:corrupt-<time>` copies are kept; older ones are removed. */
+export const MAX_BACKUPS = 5
 
 /** Why a load could not return the user's stored state. */
 export type LoadProblem =
   | { kind: 'unavailable'; message: string }
   | { kind: 'corrupt'; backupKey: string | null; message: string }
+  /**
+   * The stored data was written by a newer build (after a rollback, say). It
+   * is still in place under the storage key, untouched, and the caller must
+   * not save over it: this build would drop whatever it does not know about.
+   */
+  | { kind: 'newer'; version: number; message: string }
 
 export interface LoadResult {
   state: ScratchpadState
@@ -93,6 +112,7 @@ export interface LoadResult {
    * The exact stored string this state came from, or null when nothing was
    * stored or it could not be read. The multi-tab guard compares `storage`
    * events against it to recognise the value this tab is already showing.
+   * Also set for a `newer` problem, where it is what a backup would copy.
    */
   raw: string | null
   /** Absent on a clean load (including a first visit with nothing stored). */
@@ -173,7 +193,11 @@ function readSettings(raw: unknown, defaultTheme: ThemeName): Settings {
 function migrate(parsed: unknown, defaultTheme: ThemeName): ScratchpadState | null {
   if (!isRecord(parsed)) return null
   if (typeof parsed.version !== 'number' || !READABLE_VERSIONS.includes(parsed.version)) return null
+  return readState(parsed, defaultTheme)
+}
 
+/** The lenient reader behind `migrate`: every field is repaired or defaulted. */
+function readState(parsed: Record<string, unknown>, defaultTheme: ThemeName): ScratchpadState {
   const buffer = isRecord(parsed.buffer) ? parsed.buffer : {}
   const content = typeof buffer.content === 'string' ? buffer.content : ''
   const name = typeof buffer.name === 'string' && buffer.name.length > 0 ? buffer.name : DEFAULT_NAME
@@ -191,14 +215,82 @@ function migrate(parsed: unknown, defaultTheme: ThemeName): ScratchpadState | nu
   }
 }
 
+const BACKUP_PREFIX = `${STORAGE_KEY}:corrupt-`
+
 export function corruptBackupKey(now: Date): string {
-  return `${STORAGE_KEY}:corrupt-${now.toISOString()}`
+  return `${BACKUP_PREFIX}${now.toISOString()}`
+}
+
+/** Existing backup keys, oldest first (the timestamp sorts as text). */
+function backupKeys(storage: StorageLike): string[] {
+  if (typeof storage.length !== 'number' || storage.key === undefined) return []
+  const keys: string[] = []
+  for (let i = 0; i < storage.length; i += 1) {
+    const key = storage.key(i)
+    if (key?.startsWith(BACKUP_PREFIX) === true) keys.push(key)
+  }
+  return keys.sort()
+}
+
+/**
+ * Copy `raw` to a timestamped backup key and return the key, or null when the
+ * copy could not be made. Never throws.
+ *
+ * Two things keep the copies from piling up: a value that is already backed
+ * up is not copied again (an unreadable payload is otherwise copied on every
+ * page load until something is typed), and only the newest `MAX_BACKUPS` are
+ * kept.
+ */
+export function backupRaw(storage: StorageLike, raw: string, now: Date): string | null {
+  try {
+    const existing = backupKeys(storage)
+    for (const key of existing.toReversed()) {
+      if (storage.getItem(key) === raw) return key
+    }
+
+    const backupKey = corruptBackupKey(now)
+    storage.setItem(backupKey, raw)
+
+    if (storage.removeItem !== undefined) {
+      const all = [...existing.filter((key) => key !== backupKey), backupKey].sort()
+      for (const key of all.slice(0, Math.max(0, all.length - MAX_BACKUPS))) {
+        try {
+          storage.removeItem(key)
+        } catch {
+          // The copy that matters was made; a stale one staying is harmless.
+        }
+      }
+    }
+    return backupKey
+  } catch {
+    return null
+  }
+}
+
+/** Parse a stored string into state, or null if this build cannot read it. */
+export function parseState(raw: string, defaultTheme: ThemeName = 'dark'): ScratchpadState | null {
+  try {
+    return migrate(JSON.parse(raw), defaultTheme)
+  } catch {
+    return null
+  }
+}
+
+/** The schema version of a payload newer than this build, else null. */
+function newerVersion(parsed: unknown): number | null {
+  if (!isRecord(parsed) || typeof parsed.version !== 'number') return null
+  return Number.isFinite(parsed.version) && parsed.version > SCHEMA_VERSION ? parsed.version : null
 }
 
 /**
  * Read the stored state. Never throws and never discards user data: an
  * unreadable payload is copied to a timestamped backup key first, and the
  * caller gets a fresh state plus a `problem` to surface.
+ *
+ * Data from a newer build is the exception to "copied": it is not damaged, so
+ * it stays where it is and the problem tells the caller not to save. Whatever
+ * of it this build understands (the single buffer, if it still has one) is
+ * returned for display.
  */
 export function load(storage: StorageLike, options: LoadOptions = {}): LoadResult {
   const defaultTheme = options.defaultTheme ?? 'dark'
@@ -217,22 +309,34 @@ export function load(storage: StorageLike, options: LoadOptions = {}): LoadResul
 
   if (raw === null) return { state: defaultState(defaultTheme), raw: null }
 
-  let migrated: ScratchpadState | null
+  let parsed: unknown
   try {
-    migrated = migrate(JSON.parse(raw), defaultTheme)
+    parsed = JSON.parse(raw)
   } catch {
-    migrated = null
+    parsed = undefined
   }
+
+  const migrated = migrate(parsed, defaultTheme)
   if (migrated !== null) return { state: migrated, raw }
 
-  // Unparseable, or a schema this build does not know. Preserve the bytes.
-  const backupKey = corruptBackupKey(now())
-  let saved: string | null = backupKey
-  try {
-    storage.setItem(backupKey, raw)
-  } catch {
-    saved = null
+  const newer = newerVersion(parsed)
+  if (newer !== null && isRecord(parsed)) {
+    return {
+      state: readState(parsed, defaultTheme),
+      raw,
+      problem: {
+        kind: 'newer',
+        version: newer,
+        message:
+          `This browser holds code saved by a newer py-scratchpad (data version ${String(newer)}; ` +
+          `this one reads up to ${String(SCHEMA_VERSION)}). It has been left untouched, and nothing ` +
+          'typed here is being saved.',
+      },
+    }
   }
+
+  // Unparseable, or not a shape this build knows. Preserve the bytes.
+  const saved = backupRaw(storage, raw, now())
 
   return {
     state: defaultState(defaultTheme),

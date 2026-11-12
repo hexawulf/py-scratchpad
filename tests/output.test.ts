@@ -5,6 +5,8 @@ import {
   createPromptTracker,
   DEFAULT_OUTPUT_LIMITS,
   FLUSH_CHARS,
+  createFlushPolicy,
+  EAGER_WRITES,
   FLUSH_MS,
   linkifyOutput,
   OUTPUT_MAX_CHARS,
@@ -265,5 +267,73 @@ describe('clickable line references', () => {
   it('returns nothing for empty text, and no links without a filename', () => {
     expect(linkifyOutput('', 'scratch.py')).toEqual([])
     expect(linkifyOutput('File "x", line 1', '')).toEqual([{ text: 'File "x", line 1' }])
+  })
+})
+
+describe('the flush policy', () => {
+  it('posts a lone write at once, however soon after the last post', () => {
+    const policy = createFlushPolicy()
+    policy.reset(1000)
+
+    // "starting", then "working…" 2 ms later, then a long silent computation:
+    // both lines must already be on their way.
+    expect(policy.onWrite(9, 1000)).toBe(true)
+    policy.flushed(1000)
+    expect(policy.onWrite(9, 1002)).toBe(true)
+  })
+
+  it('posts every write of a slow trickle', () => {
+    const policy = createFlushPolicy()
+    policy.reset(0)
+    for (let i = 0; i < 200; i += 1) {
+      const now = i * 10
+      expect(policy.onWrite(5, now)).toBe(true)
+      policy.flushed(now)
+    }
+  })
+
+  it('batches a burst once the window allowance is used up', () => {
+    const policy = createFlushPolicy()
+    policy.reset(0)
+
+    let posts = 0
+    let pending = 0
+    // 100,000 writes of 6 characters inside one 40 ms stretch.
+    for (let i = 0; i < 100_000; i += 1) {
+      const now = (i / 100_000) * 40
+      pending += 6
+      if (policy.onWrite(pending, now)) {
+        posts += 1
+        pending = 0
+        policy.flushed(now)
+      }
+    }
+
+    // The allowance, then one post per FLUSH_CHARS — not one per write.
+    expect(posts).toBeGreaterThanOrEqual(EAGER_WRITES)
+    expect(posts).toBeLessThan(EAGER_WRITES + Math.ceil((100_000 * 6) / FLUSH_CHARS) + 2)
+  })
+
+  it('gives a new allowance in each window', () => {
+    const policy = createFlushPolicy(2)
+    policy.reset(0)
+
+    expect(policy.onWrite(1, 0)).toBe(true)
+    expect(policy.onWrite(1, 1)).toBe(true)
+    expect(policy.onWrite(1, 2)).toBe(false)
+    expect(policy.onWrite(2, FLUSH_MS)).toBe(true)
+  })
+
+  it('still flushes by time during a burst', () => {
+    const policy = createFlushPolicy(0)
+    policy.reset(0)
+    expect(policy.onWrite(10, 1)).toBe(false)
+    expect(policy.onWrite(20, FLUSH_MS)).toBe(true)
+  })
+
+  it('has nothing to post when nothing is pending', () => {
+    const policy = createFlushPolicy()
+    policy.reset(0)
+    expect(policy.onWrite(0, 5)).toBe(false)
   })
 })

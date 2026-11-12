@@ -25,6 +25,8 @@ export interface NoticeState {
   link?: NoticeLink
   /** Whether a ✕ is offered that hides the bar for the rest of the session. */
   dismissible?: boolean
+  /** Whether the "Save here anyway" button is shown; see `newerDataNotice`. */
+  unlock?: boolean
 }
 
 /** Another tab wrote the storage key, so autosave here is paused. */
@@ -32,6 +34,14 @@ export const CONFLICT_NOTICE: NoticeState = {
   message: 'Changed in another tab — autosave is paused here.',
   tone: 'error',
   actions: true,
+}
+
+/**
+ * Storage holds a newer build's data, so this tab is not saving. It stays up
+ * until the user takes the one way out it offers.
+ */
+export function newerDataNotice(message: string): NoticeState {
+  return { message, tone: 'error', actions: false, unlock: true }
 }
 
 /** The user chose Reload, and the other tab's version is now loaded. */

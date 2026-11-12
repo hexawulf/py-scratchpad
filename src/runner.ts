@@ -130,6 +130,17 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     options.onPhase(next)
   }
 
+  /**
+   * Take back a Stop that nothing consumed. The byte lives on a buffer that
+   * outlives both the run and the worker, so a SIGINT left in it is delivered
+   * to whatever runs Python next: the following Run ("Stopped after 0 ms"),
+   * or a replacement worker loading runner.py (a load failure reading
+   * "KeyboardInterrupt"). Every path that starts either one clears it first.
+   */
+  function clearInterrupt(): void {
+    if (interrupt !== null) Atomics.store(interrupt, 0, 0)
+  }
+
   function clearStopTimer(): void {
     if (stopTimer !== undefined) {
       window.clearTimeout(stopTimer)
@@ -171,6 +182,7 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   function dispatch(params: RunParams): void {
     if (worker === null) return
     runId += 1
+    clearInterrupt()
     setPhase('running')
     worker.postMessage({
       kind: 'run',
@@ -221,6 +233,8 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
       case 'done':
         if (event.id !== runId) return
         clearStopTimer()
+        // A Stop that arrived as the run was already finishing.
+        clearInterrupt()
         setPhase('ready')
         options.onDone(event.status, event.ms)
         return
@@ -232,6 +246,8 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     clearStopTimer()
     worker?.terminate()
     worker = null
+    // Before the replacement exists: it is handed this same buffer.
+    clearInterrupt()
     info = null
     queued = null
     setPhase('cold')
