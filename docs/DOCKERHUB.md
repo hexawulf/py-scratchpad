@@ -27,7 +27,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.4
+  -p 8080:80 0xwulf/py-scratchpad:0.3.5
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -40,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.4
+  0xwulf/py-scratchpad:0.3.5
 ```
 
 ## Docker Compose
@@ -48,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.4 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.5 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -75,7 +75,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.4`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.5`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -193,6 +193,16 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.5** — four fixes, no new features. **Stop**: a Stop that had to restart the interpreter
+  left its interrupt behind, so the fresh interpreter failed to load with `KeyboardInterrupt`
+  (and a Stop clicked as a run finished ended the next Run at once); the interrupt is now cleared
+  before every run and every restart. **Two tabs**: moving the caret or switching theme in one
+  tab no longer pauses autosave in the other; only a change to the code, the file name or its
+  encoding does, and the other tab follows the theme, font size and run mode. **Output**: a line
+  printed just before a long computation is shown while it runs instead of when it ends. **Data
+  from a newer version** (after a rollback): left untouched and shown with a notice instead of
+  being set aside for an empty editor; `Save here anyway` keeps a copy first. Backup copies of
+  unreadable data are no longer repeated on every load and only the newest five are kept.
 - **0.3.4** — search and link-preview metadata; no change to the editor or the runtime. The page
   names `https://py-scratchpad.com/` as its canonical URL, so the copy still served at
   `python.piapps.dev` is not indexed as a duplicate, and carries a fuller title and description,
