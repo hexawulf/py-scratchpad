@@ -9,7 +9,7 @@
 
 ARG NODE_VERSION=22.23.3
 ARG ALPINE_VERSION=3.24
-ARG NGINX_VERSION=1.30.5
+ARG NGINX_VERSION=1.30.6
 
 # --- build: produce dist/ -----------------------------------------------------
 # $BUILDPLATFORM-pinned: dist/ is byte-identical on every arch, so the bundle is
@@ -31,6 +31,10 @@ RUN npm run build
 
 # --- runtime: serve dist/ -----------------------------------------------------
 FROM nginx:${NGINX_VERSION}-alpine${ALPINE_VERSION}
+# The nginx tag is rebuilt upstream only now and then, so pull in Alpine's
+# security fixes at build time. release.yml's Trivy gate fails a release on a
+# fixable CRITICAL; 0.3.5 shipped with brotli-libs CVE-2026-111497 unpatched.
+RUN apk upgrade --no-cache
 ARG VERSION=dev
 ARG REVISION=unknown
 

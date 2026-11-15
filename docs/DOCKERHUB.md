@@ -27,7 +27,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.5
+  -p 8080:80 0xwulf/py-scratchpad:0.3.6
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -40,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.5
+  0xwulf/py-scratchpad:0.3.6
 ```
 
 ## Docker Compose
@@ -48,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.5 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.6 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -75,7 +75,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.5`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.6`                 |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -193,6 +193,10 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.6** — security rebuild, no app changes. nginx 1.30.5 → 1.30.6 (three HIGH CVEs) and
+  `apk upgrade` at build time, which clears the base image's fixable CVEs (brotli-libs CRITICAL
+  CVE-2026-111497; libexpat, libxslt, curl, musl, zlib, pcre2, tiff, libx11 HIGH). Releases are
+  now scanned with Trivy and blocked on any fixable CRITICAL.
 - **0.3.5** — four fixes, no new features. **Stop**: a Stop that had to restart the interpreter
   left its interrupt behind, so the fresh interpreter failed to load with `KeyboardInterrupt`
   (and a Stop clicked as a run finished ended the next Run at once); the interrupt is now cleared
