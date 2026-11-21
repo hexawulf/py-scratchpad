@@ -5,7 +5,19 @@ All notable changes to `py-scratchpad` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.7] - 2026-11-21
+## [0.3.8] - 2026-11-21
+
+### Security
+
+- Rebuilt runtime image on `nginx:1.30.7-alpine3.24` (from `1.30.6`), clearing four fixable `CRITICAL` nginx CVEs (`CVE-2026-113425`, `CVE-2026-121810`, `CVE-2026-123007`, `CVE-2026-123633`) and two fixable `HIGH` (`CVE-2026-118899`, `CVE-2026-123634`).
+
+### Changed
+
+- Includes the 0.3.7 About dialog change below.
+
+## [0.3.7] - 2026-11-21 [NOT PUBLISHED]
+
+Tagged, but the release Trivy gate blocked publication on the nginx CVEs fixed in 0.3.8. No image exists for this version.
 
 ### Changed
 
@@ -94,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-stage `node`/`nginx` Docker image with strict CSP, security headers, read-only rootfs Docker Compose configuration, and multi-arch (`linux/amd64`, `linux/arm64`) GitHub Actions CI and release workflows with SHA-pinned actions, SBOM, and provenance attestations.
 - MIT license and Docker Hub overview documentation.
 
+[0.3.8]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.4...v0.3.5

@@ -9,7 +9,7 @@
 
 ARG NODE_VERSION=22.23.3
 ARG ALPINE_VERSION=3.24
-ARG NGINX_VERSION=1.30.6
+ARG NGINX_VERSION=1.30.7
 
 # --- build: produce dist/ -----------------------------------------------------
 # $BUILDPLATFORM-pinned: dist/ is byte-identical on every arch, so the bundle is
