@@ -5,6 +5,12 @@ All notable changes to `py-scratchpad` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-11-21
+
+### Changed
+
+- About dialog: renamed the **Contact** section to **Developer** and set the attribution to `Erling Wulf Weinreich (0xWulf) · dev@0xwulf.dev`, matching the other HexaWulf apps.
+
 ## [0.3.6] - 2026-11-16
 
 ### Security
@@ -88,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-stage `node`/`nginx` Docker image with strict CSP, security headers, read-only rootfs Docker Compose configuration, and multi-arch (`linux/amd64`, `linux/arm64`) GitHub Actions CI and release workflows with SHA-pinned actions, SBOM, and provenance attestations.
 - MIT license and Docker Hub overview documentation.
 
+[0.3.7]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.3...v0.3.4
