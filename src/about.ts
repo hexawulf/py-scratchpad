@@ -15,7 +15,7 @@ import { SCHEMA_VERSION, type ThemeName } from './storage.ts'
 
 export const TAGLINE = 'A Python scratchpad that never leaves your browser tab.'
 
-export const CONTACT = { author: '0xWulf', email: 'dev@0xwulf.dev' }
+export const CONTACT = { author: 'Erling Wulf Weinreich (0xWulf)', email: 'dev@0xwulf.dev' }
 
 const REPO = 'https://github.com/hexawulf/py-scratchpad'
 

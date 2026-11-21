@@ -76,7 +76,7 @@ export function createAboutDialog(options: AboutDialogOptions): void {
       <p class="about-runtime"></p>
       <h3>Tech stack</h3>
       <dl class="about-stack"></dl>
-      <h3>Contact</h3>
+      <h3>Developer</h3>
       <p class="about-contact"></p>
       <h3>Links</h3>
       <ul class="about-links"></ul>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildStack,
+  CONTACT,
   type DiagnosticsInputs,
   diagnosticsLine,
   formatBuildMonth,
@@ -200,5 +201,13 @@ describe('LINKS', () => {
       expect(link.href.startsWith('https://')).toBe(true)
       expect(link.label).not.toBe('')
     }
+  })
+})
+
+describe('CONTACT', () => {
+  // The single developer attribution, identical across the showcase apps.
+  it('names the developer and the contact email', () => {
+    expect(CONTACT.author).toBe('Erling Wulf Weinreich (0xWulf)')
+    expect(CONTACT.email).toBe('dev@0xwulf.dev')
   })
 })
