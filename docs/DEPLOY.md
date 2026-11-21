@@ -38,7 +38,10 @@ any working directory.
 
 ## 1. Cutting a release
 
-Run from linuxsvr, in `/home/zk/projects/python/py-scratchpad`.
+Run on piapps2, in `/home/zk/bots/py-scratchpad`. That directory is both the
+**only source clone** and the deploy directory: the repo's `docker-compose.yml`
+is the file the production container runs from. No source clone lives on a
+workstation (moved off linuxsvr 2026-11-21).
 
 **1.1 Pass the local gate.**
 
@@ -138,17 +141,18 @@ expected. The workflow also moves `:X.Y` and `:latest`; piapps2 pins the full
 
 ## 2. Deploying to piapps2
 
-**2.1 Bump the pinned tag in both copies.** The tag appears in the repo's
-`docker-compose.yml` and in piapps2's copy, so update the repo file, then copy
-it over and prove the two are identical.
+**2.1 The pinned tag is already in place.** There is one copy of
+`docker-compose.yml`: the deploy directory is the repo clone, so the tag bumped
+in §1.2 and committed in §1.3 is what §2.2 pulls. Check it, and check the clone
+matches `origin/main`:
 
 ```
-scp /home/zk/projects/python/py-scratchpad/docker-compose.yml piapps2:/home/zk/bots/py-scratchpad/docker-compose.yml
-sha256sum /home/zk/projects/python/py-scratchpad/docker-compose.yml
-ssh piapps2 'sha256sum /home/zk/bots/py-scratchpad/docker-compose.yml'
+cd /home/zk/bots/py-scratchpad ; git fetch -q origin ; git status -sb ; grep -n 'image:' /home/zk/bots/py-scratchpad/docker-compose.yml
 ```
 
-The two checksums must match. Commit the repo change with the release.
+Do not run §2.2/§2.3 before §1.7 has confirmed the image exists: between the
+release commit and the published image the file names a tag Docker Hub does
+not have yet (a failed pull leaves the running container as it is).
 
 **2.2 Pull the image.** The running container keeps serving while this runs.
 
@@ -260,10 +264,10 @@ Both counts must be `1` on both hostnames.
 Headers being present is not proof that the browser agreed to isolate the
 document, so ask one. `playwright.config.ts` starts its own preview server and
 cannot be pointed at production, so this is a one-off, run from the repo on
-linuxsvr (Chromium comes from `npx playwright install chromium`):
+piapps2 (Chromium comes from `npx playwright install chromium`):
 
 ```
-cd /home/zk/projects/python/py-scratchpad
+cd /home/zk/bots/py-scratchpad
 node --input-type=module -e 'import {chromium} from "playwright"; const b = await chromium.launch(); const p = await b.newPage(); for (const u of ["https://py-scratchpad.com/", "https://python.piapps.dev/"]) { await p.goto(u); console.log(u, "crossOriginIsolated =", await p.evaluate(() => window.crossOriginIsolated)); } await b.close()'
 ```
 
@@ -276,14 +280,28 @@ browser — **widen nothing in the CSP to compensate**; find the header.
 
 ## 3. Local development build
 
-piapps2's compose file pulls a pinned release and has no `build:`. To build and
-run the working tree on a workstation, add `docker-compose.dev.yml`, which
-builds the tree, tags it `py-scratchpad:dev` and binds to loopback:
+piapps2's compose file pulls a pinned release and has no `build:`.
+
+**Never use `docker-compose.dev.yml` in `/home/zk/bots/py-scratchpad`.** That
+directory is the production compose project, and the override keeps the same
+service and `container_name: py-scratchpad`, so `up` would rebuild and
+**replace the live container** with the working tree.
+
+To run the working tree as an image on piapps2, use the image test instead. It
+builds `py-scratchpad:e2e`, runs it as `py-scratchpad-e2e` on
+`127.0.0.1:5041` beside production, runs the browser suite and removes it:
 
 ```
-docker compose -f /home/zk/projects/python/py-scratchpad/docker-compose.yml -f /home/zk/projects/python/py-scratchpad/docker-compose.dev.yml up -d --build
+cd /home/zk/bots/py-scratchpad ; npm run test:e2e:image
+```
+
+The dev override is only for a throwaway clone on another machine, where no
+production container exists:
+
+```
+docker compose -f <clone>/docker-compose.yml -f <clone>/docker-compose.dev.yml up -d --build
 curl -sI http://127.0.0.1:5040/
-docker compose -f /home/zk/projects/python/py-scratchpad/docker-compose.yml -f /home/zk/projects/python/py-scratchpad/docker-compose.dev.yml down
+docker compose -f <clone>/docker-compose.yml -f <clone>/docker-compose.dev.yml down
 ```
 
 ---
@@ -433,7 +451,7 @@ Never edit in place. Write the file locally, copy it, install it, then test and 
 For `py-scratchpad.com` the local source is in this repo:
 
 ```
-scp /home/zk/projects/python/py-scratchpad/docs/nginx/py-scratchpad.com piapps:/tmp/py-scratchpad.com
+scp /home/zk/bots/py-scratchpad/docs/nginx/py-scratchpad.com piapps:/tmp/py-scratchpad.com
 ssh piapps 'sudo nginx -T > /home/zk/backups/piapps-nginx-T.bak_$(date +%Y%m%d_%H%M%S)'
 ssh piapps 'sudo install -m 644 -o root -g root /tmp/py-scratchpad.com /etc/nginx/sites-available/py-scratchpad.com'
 ssh piapps 'sudo nginx -t'

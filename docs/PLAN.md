@@ -22,7 +22,7 @@ Build it with Claude Code + VS Code in a new GitHub repo. Host it on **piapps2**
 | Thing | Name |
 |---|---|
 | GitHub repo | `hexawulf/py-scratchpad` |
-| Dev checkout (linuxsvr) | `/home/zk/projects/python/py-scratchpad`. It sits inside the `python-learner` repo, so `/py-scratchpad/` is listed in that repo's `.gitignore` |
+| Source clone (piapps2) | `/home/zk/bots/py-scratchpad`, the only source clone and also the deploy directory (moved off linuxsvr 2026-11-21; no source clone on a workstation) |
 | Compose dir (piapps2) | `/home/zk/bots/py-scratchpad` |
 | Container | `py-scratchpad` |
 | localStorage key | `py-scratchpad:v1` |

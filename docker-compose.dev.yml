@@ -1,7 +1,11 @@
 # Local development override. Used alongside docker-compose.yml, never on its own:
 #
-#   docker compose -f /home/zk/projects/python/py-scratchpad/docker-compose.yml \
-#                  -f /home/zk/projects/python/py-scratchpad/docker-compose.dev.yml up -d --build
+#   docker compose -f <clone>/docker-compose.yml \
+#                  -f <clone>/docker-compose.dev.yml up -d --build
+#
+# NEVER run this in /home/zk/bots/py-scratchpad on piapps2: that is the
+# production compose project, and the same service/container_name would replace
+# the live container. On piapps2 use `npm run test:e2e:image` (port 5041).
 #
 # It builds the working tree instead of pulling the pinned release, tags the
 # result py-scratchpad:dev so it can never be confused with a published image,
