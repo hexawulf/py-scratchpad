@@ -5,6 +5,14 @@ All notable changes to `py-scratchpad` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-11-22
+
+### Changed
+
+- Runtime: Pyodide 314.0.7 → 314.0.8, `@codemirror/view` 6.43.14 → 6.43.15 (Dependabot #4).
+- Dev tooling: vite 8.3.8, vitest 5.1.1, eslint 10.15.0, typescript-eslint 8.73.0, Playwright 1.65.1, globals 17.14.0 (#4); `@types/node` 26.6.6 (#6).
+- CI: GitHub Actions group updated (#3).
+
 ## [0.3.8] - 2026-11-21
 
 ### Security
