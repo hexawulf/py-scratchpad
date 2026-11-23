@@ -104,8 +104,9 @@ export default defineConfig({
     __PYODIDE_INDEX_URL__: JSON.stringify(pyodideIndexUrl(PYODIDE_VERSION)),
   },
   build: {
-    // No source maps in the published build: the repo is private, and a .map
-    // ships the full TypeScript source to anyone who loads the page.
+    // No source maps in the published build. The repo is public, so a .map
+    // would hide nothing; it would only add about 2 MB to every deploy.
+    // docs/DEPLOY.md §2.5 checks that /assets/*.js.map answers 404.
     sourcemap: false,
     target: 'es2022',
   },

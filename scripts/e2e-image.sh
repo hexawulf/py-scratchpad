@@ -74,8 +74,9 @@ if ! curl -sf -o /dev/null "${BASE_URL}/"; then
     exit 1
 fi
 
-# The three Content-Types that have to be right or the runtime cannot start.
-# Checked here as well as in the browser, so a failure names the file.
+# The Content-Types of all six runtime files. Three of them (.wasm and the two
+# .mjs) have to be right or the runtime cannot start. Checked here as well as
+# in the browser, so a failure names the file.
 say "checking the runtime's Content-Types"
 status=0
 VERSION="$(node -p 'require("'"${REPO}"'/package.json").dependencies.pyodide')"
