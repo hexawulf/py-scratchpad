@@ -11,8 +11,6 @@
 /** How a Run compiles the buffer. Persisted in settings; see storage.ts. */
 export type RunMode = 'repl' | 'script'
 
-export const RUN_MODES: readonly RunMode[] = ['repl', 'script']
-
 export function isRunMode(value: unknown): value is RunMode {
   return value === 'repl' || value === 'script'
 }
@@ -92,12 +90,6 @@ export interface OutputEvent {
   text: string
 }
 
-/** The cap was reached; the worker has stopped forwarding this run's output. */
-export interface TruncatedEvent {
-  kind: 'truncated'
-  id: number
-}
-
 /** `input()` was called and the worker is now blocked waiting for a line. */
 export interface StdinEvent {
   kind: 'stdin'
@@ -118,6 +110,5 @@ export type WorkerEvent =
   | ReadyEvent
   | FailedEvent
   | OutputEvent
-  | TruncatedEvent
   | StdinEvent
   | DoneEvent

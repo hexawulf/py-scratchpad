@@ -124,7 +124,6 @@ function emit(stream: 'out' | 'err', text: string): void {
     pending.push({ stream: 'err', text: TRUNCATED_NOTICE })
     pendingChars += TRUNCATED_NOTICE.length
     flushOutput()
-    post({ kind: 'truncated', id: current?.id ?? 0 })
     return
   }
 

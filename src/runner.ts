@@ -80,10 +80,7 @@ export interface RunnerHandle {
   restart: () => void
   /** Answer a pending `input()`. Ignored when nothing is waiting. */
   sendInput: (line: string) => void
-  /** End input, so `input()` raises `EOFError`. */
-  endInput: () => void
   readonly phase: RunnerPhase
-  readonly info: RuntimeInfo | null
   /**
    * Whether `input()` can be answered while the program runs. False without
    * cross-origin isolation, where the lines have to be supplied up front.
@@ -105,7 +102,6 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
 
   let worker: Worker | null = null
   let phase: RunnerPhase = 'cold'
-  let info: RuntimeInfo | null = null
 
   /** The run waiting for the interpreter to finish loading, if any. */
   let queued: RunParams | null = null
@@ -201,7 +197,6 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
 
     switch (event.kind) {
       case 'ready':
-        info = event.info
         options.onReady(event.info)
         setPhase('ready')
         if (queued !== null) {
@@ -219,9 +214,6 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
       case 'output':
         if (event.id !== runId) return
         options.onOutput(event.stream, event.text)
-        return
-
-      case 'truncated':
         return
 
       case 'stdin':
@@ -248,7 +240,6 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     worker = null
     // Before the replacement exists: it is handed this same buffer.
     clearInterrupt()
-    info = null
     queued = null
     setPhase('cold')
     ensureWorker()
@@ -257,9 +248,6 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   return {
     get phase() {
       return phase
-    },
-    get info() {
-      return info
     },
     get supportsInteractiveInput() {
       return stdin !== null
@@ -320,12 +308,6 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     sendInput(line) {
       if (stdin === null || !isAwaitingStdin(stdin)) return
       sendStdinLine(stdin, line)
-      setPhase('running')
-    },
-
-    endInput() {
-      if (stdin === null || !isAwaitingStdin(stdin)) return
-      sendStdinEof(stdin)
       setPhase('running')
     },
   }
