@@ -17,8 +17,8 @@ Python interpreter is WebAssembly served from the same origin.
 
 ![The py-scratchpad editor on its dark theme, filename hello.py, in REPL echo mode. The buffer
 holds bare arithmetic expressions, a celsius() function and a for loop; the output panel below
-reports "Done in 2 ms" and shows the echoed values 610, 3.5, 3 and 1024 followed by the loop's
-printed lines.](docs/screenshots/run-dark.png)
+reports the run as done and shows the echoed values 610, 3.5, 3 and 1024, followed by the loop's
+printed lines and celsius(98.6)'s 37.0.](docs/screenshots/run-dark.png)
 
 ## Features
 
