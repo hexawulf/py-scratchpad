@@ -152,9 +152,9 @@ wrong).
 | Volume      | none — there is no server-side state to persist                       |
 | User        | nginx's default: master as root, worker processes as `nginx`          |
 | Healthcheck | not baked in; the Compose snippet above adds one with busybox `wget`  |
-| Base        | `nginx:1.30.5-alpine3.24`, built with `node:22.23.3-alpine3.24`       |
-| Size        | about 32 MB compressed (113 MB on disk); 5–15 MiB RAM                 |
-| Runtime     | Pyodide 314.0.7 (CPython 3.14.2), 13 MB served from `/pyodide/`       |
+| Base        | `nginx:1.30.7-alpine3.24`, built with `node:22.23.3-alpine3.24`       |
+| Size        | about 36 MB compressed (84 MB on disk, arm64); 5–15 MiB RAM           |
+| Runtime     | Pyodide 314.0.8 (CPython 3.14.2), 13 MB served from `/pyodide/`       |
 
 **Reverse proxy:** serve it over HTTPS on its own hostname. It is plain static
 files over HTTP/1.1 — no WebSockets, no server-sent events, no buffering

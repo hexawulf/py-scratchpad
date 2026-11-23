@@ -5,6 +5,23 @@ All notable changes to `py-scratchpad` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- UI accent palette and favicon moved to 0xWulf teal (`#14B8A6` dark / `#0D9488` light) (`dac3766`).
+- **Run** is now the one filled button, so the page has a visible primary action (light theme fill `#0F766E`, so white text clears 4.5:1).
+- Dark theme: stderr and tracebacks use `#F38BA8`, so they no longer read as ordinary output.
+- About dialog: the Runtime row has the same size and spacing as the other rows.
+
+### Removed
+
+- Unused runner and protocol surface: `RUN_MODES`, the ignored worker `truncated` message, and `RunnerHandle.endInput` / `.info`.
+
+### Fixed
+
+- Docs: stale base-image and Pyodide versions in `docs/DOCKERHUB.md`, and stale "piapps2 is not a git checkout" notes in `docs/DEPLOY.md`.
+
 ## [0.3.9] - 2026-11-22
 
 ### Changed
@@ -114,6 +131,8 @@ Tagged, but the release Trivy gate blocked publication on the nginx CVEs fixed i
 - Multi-stage `node`/`nginx` Docker image with strict CSP, security headers, read-only rootfs Docker Compose configuration, and multi-arch (`linux/amd64`, `linux/arm64`) GitHub Actions CI and release workflows with SHA-pinned actions, SBOM, and provenance attestations.
 - MIT license and Docker Hub overview documentation.
 
+[Unreleased]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.9...HEAD
+[0.3.9]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.5...v0.3.6

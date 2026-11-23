@@ -22,7 +22,7 @@ Hub. piapps2 **pulls a pinned tag** and never builds; it holds one file.
 | Thing | Value |
 |---|---|
 | Host | piapps2, `192.168.50.120` (eth0 — never `.179`/wlan0) |
-| Compose file | `/home/zk/bots/py-scratchpad/docker-compose.yml` (a copy of the repo's, not a checkout) |
+| Compose file | `/home/zk/bots/py-scratchpad/docker-compose.yml` (the repo's own file: that directory is the source clone) |
 | Container | `py-scratchpad` |
 | Image | `0xwulf/py-scratchpad:X.Y.Z` — pinned, so watchtower is opted out |
 | LAN endpoint | `http://192.168.50.120:5040/` |
@@ -316,8 +316,10 @@ In order, least to most destructive. There is no data to lose at any point.
 ssh piapps2 'docker compose -f /home/zk/bots/py-scratchpad/docker-compose.yml down'
 ```
 
-**4.2 Pin the previous version.** Edit the tag in both copies back to the last
-good `X.Y.Z` (§2.1), then `pull` and `up -d`. Published tags are immutable, so
+**4.2 Pin the previous version.** Back up
+`/home/zk/bots/py-scratchpad/docker-compose.yml`, edit its tag back to the last
+good `X.Y.Z` (§2.1) with nano, then `pull` and `up -d`. There is one copy of the
+file, so this leaves the clone dirty until a commit reverts the tag on `main`. Published tags are immutable, so
 the earlier image is still there. This is the normal rollback.
 
 **4.3 Fall back to a local build.** If Docker Hub or the registry is the
@@ -577,11 +579,12 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
 - **`*.py-scratchpad.com` is a wildcard A record** on that zone, pointing at the same WAN IP.
   No vhost claims those names and the certificate does not cover them, so any unused
   subdomain returns Cloudflare 525. Harmless, but it is not a feature.
-- **piapps2 is not a git checkout.** It holds `docker-compose.yml` and nothing
-  else, matching `/home/zk/bots/stocky`. The repo is the source of truth; §2.1
-  copies the file and checksums both ends.
+- **piapps2 holds the only source clone** (since 2026-11-21), and it is also the
+  deploy directory: `/home/zk/bots/py-scratchpad/docker-compose.yml` is the
+  file production runs from, so `git pull` there is what moves the pinned tag
+  (§2.1). Never run `docker-compose.dev.yml` in it (§3).
 - **Base images are pinned exactly** in the `Dockerfile` as build args
-  (`NODE_VERSION=22.23.3`, `ALPINE_VERSION=3.24`, `NGINX_VERSION=1.30.5`).
+  (`NODE_VERSION=22.23.3`, `ALPINE_VERSION=3.24`, `NGINX_VERSION=1.30.7`).
   Bumping them is a deliberate commit, not something a rebuild does on its own.
   `package.json`'s `engines.node` keeps CI on the same Node major as the image.
 - **The build date comes from the source, not the clock.** `vite.config.ts`
