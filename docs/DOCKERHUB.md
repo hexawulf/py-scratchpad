@@ -27,7 +27,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.9
+  -p 8080:80 0xwulf/py-scratchpad:0.3.10
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -40,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.9
+  0xwulf/py-scratchpad:0.3.10
 ```
 
 ## Docker Compose
@@ -48,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.9 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.10 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -75,7 +75,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.9`                 |
+| `X.Y.Z`  | one exact release, e.g. `0.3.10`                |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -193,6 +193,9 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.10** — interface polish and cleanup, no runtime change. Run is now the one filled button;
+  dark-theme tracebacks use a clearly red tone; the accent palette and favicon are 0xWulf teal; the
+  About dialog's Runtime row matches the others. Unused worker messages removed; docs refreshed.
 - **0.3.9** — dependency updates, no app changes. Pyodide 314.0.7 → 314.0.8, CodeMirror view
   6.43.15; dev tooling vite 8.3.8, vitest 5.1, eslint 10.15, Playwright 1.65.1; CI actions updated.
 - **0.3.8** — security rebuild plus the 0.3.7 change. nginx 1.30.6 → 1.30.7 clears four CRITICAL
