@@ -14,8 +14,15 @@
   --muted: #7f849c;
   --border: #313244;
   --accent: #14b8a6;
+  /* The Run button is the one filled control: teal fill, near-black text (5.8:1). */
+  --primary-bg: #14b8a6;
+  --primary-fg: #042f2e;
   --error-bg: #3a1f28;
-  --error-fg: #f2b8c6;
+  /*
+   * Saturated enough to tell a traceback from stdout at a glance; the old
+   * #f2b8c6 read as near-white next to --fg. 7.1:1 on --bg, 6.5:1 on --error-bg.
+   */
+  --error-fg: #f38ba8;
   /* Fill for a hovered icon button; stocky's --color-background-mute. */
   --hover-bg: #313244;
   /* Code, file names and program output. Local fonts only: no web font is fetched. */
@@ -33,6 +40,9 @@
   --muted: #6c6f85;
   --border: #d4d6e0;
   --accent: #0d9488;
+  /* One step darker than the accent, so white text clears 4.5:1 (5.5:1). */
+  --primary-bg: #0f766e;
+  --primary-fg: #ffffff;
   --error-bg: #fde8ec;
   --error-fg: #8c1f35;
   --hover-bg: #e2e4ee;
@@ -186,15 +196,26 @@ button:disabled {
  * Run controls
  * ------------------------------------------------------------------------ */
 
+/*
+ * The page's one primary action, so the only filled button: every other
+ * control is an outline. The busy state drops back to an outline, which is
+ * what tells the user Run is not available right now.
+ */
 .run-button {
   font-weight: 600;
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--primary-fg);
+  background: var(--primary-bg);
+  border-color: var(--primary-bg);
+}
+
+.run-button:hover:not(:disabled) {
+  border-color: var(--fg);
 }
 
 /* While Python is loading or a program is running. */
 .run-button.is-busy {
   color: var(--muted);
+  background: var(--bg);
   border-color: var(--border);
 }
 
@@ -642,6 +663,8 @@ button:disabled {
   color: var(--muted);
 }
 
+/* Body rows under an h3: same size as the stack list, no UA paragraph margin. */
+.about-runtime,
 .about-contact {
   margin: 0;
   font-size: 0.8rem;
