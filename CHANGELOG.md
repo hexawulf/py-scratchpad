@@ -5,6 +5,17 @@ All notable changes to `py-scratchpad` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] - 2026-11-25
+
+### Changed
+
+- Internal: the Reload path reuses `adoptSettings()` instead of repeating the theme, font-size and run-mode lines, and three no-op `clampFontSize` calls are gone (`load()` and `parseState()` already clamp). No behavior change (#7).
+- README screenshots and `og-image` retaken for 0.3.10 now ship in the image (`33b5782`).
+
+### Added
+
+- Storage test that pins font-size clamping on load (#7).
+
 ## [0.3.10] - 2026-11-23
 
 ### Changed
@@ -131,6 +142,7 @@ Tagged, but the release Trivy gate blocked publication on the nginx CVEs fixed i
 - Multi-stage `node`/`nginx` Docker image with strict CSP, security headers, read-only rootfs Docker Compose configuration, and multi-arch (`linux/amd64`, `linux/arm64`) GitHub Actions CI and release workflows with SHA-pinned actions, SBOM, and provenance attestations.
 - MIT license and Docker Hub overview documentation.
 
+[0.3.11]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.7...v0.3.8
