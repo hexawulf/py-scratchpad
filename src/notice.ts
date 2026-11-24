@@ -89,8 +89,7 @@ export const MOVE_NOTICE: NoticeState = {
  * nothing is stored, or when session storage could not be read at all).
  *
  * Only the old hostname gets it. `py-scratchpad.com`, `www`, `localhost` and
- * the LAN endpoint `192.168.50.120:5040` must not: there is nothing to move
- * away from there.
+ * a plain LAN address must not: there is nothing to move away from there.
  */
 export function shouldShowMoveNotice(hostname: string, dismissed: string | null): boolean {
   if (hostname.toLowerCase() !== OLD_HOSTNAME) return false

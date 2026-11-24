@@ -108,7 +108,7 @@ describe('the move notice', () => {
       'www.py-scratchpad.com',
       'localhost',
       '127.0.0.1',
-      '192.168.50.120',
+      '192.0.2.10', // TEST-NET-1 (RFC 5737), standing in for a LAN address
     ]) {
       expect(shouldShowMoveNotice(host, null)).toBe(false)
     }

@@ -13,7 +13,7 @@ Separate repo from the parent python-learner; its tutoring rules don't apply her
 - `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` are load-bearing, not hardening: they give the page `SharedArrayBuffer`, which Stop's interrupt buffer and the synchronous `input()` bridge are built on. They live in `docker/security-headers.conf` and in the Vite plugin's dev/preview middleware, so dev behaves like prod. Everything must still work without them — that is the Program-input fallback.
 - Pin exact dependency versions; commit package-lock.json.
 - Run `npm run lint && npm test && npm run build` before saying a change is done. Anything touching `docker/nginx.conf`, the staged runtime files or the headers also needs `npm run test:e2e:image` — `vite preview` types `.mjs` as JavaScript and nginx does not, which is how 0.3.0 shipped with every Run broken.
-- Deploy target: piapps2 `/home/zk/bots/py-scratchpad`, container `py-scratchpad`, port 192.168.50.120:5040. That directory is also the **only source clone** (no clone on a workstation): work, release and deploy all happen there. Never run `docker-compose.dev.yml` in it (it would replace the live container); use `npm run test:e2e:image`. Two piapps vhosts proxy it: `py-scratchpad.com` (the public home, apex + www) and `python.piapps.dev` (the original, still serving). No redirect between them — localStorage is per origin, so redirecting the old host would hide code saved there.
+- Deploy target: the production host's clone of this repo, container `py-scratchpad` (host, path and port are in [docs/DEPLOY.md](docs/DEPLOY.md) §2). That directory is also the **only source clone** (no clone on a workstation): work, release and deploy all happen there. Never run `docker-compose.dev.yml` in it (it would replace the live container); use `npm run test:e2e:image`. Two vhosts on the edge nginx proxy it: `py-scratchpad.com` (the public home, apex + www) and `python.piapps.dev` (the original, still serving). No redirect between them — localStorage is per origin, so redirecting the old host would hide code saved there.
 
 ## House rules
 
@@ -31,8 +31,9 @@ Homelab conventions (0xWulf's standard, see the `hexawulf-homelab` skill):
 
 Release flow: one `npm run lint && npm test && npm run build` gate, then the full runbook in
 [docs/DEPLOY.md](docs/DEPLOY.md) — §1 cuts the release (version bump, signed commit, CI, signed
-tag, multi-arch publish), §2 deploys it to piapps2, §4 is the rollback, §6 is the piapps nginx
-ingress (an operator approval gate). Production nginx on piapps is never edited in place.
+tag, multi-arch publish), §2 deploys it to the production host, §4 is the rollback, §6 is the
+edge nginx ingress (an operator approval gate). Production nginx on the edge host is never
+edited in place.
 
 Reproducible builds: the version and build date in the About dialog come from `package.json` and
 from **the last commit's date** (`git log -1 --format=%cI`, overridden by `SOURCE_DATE_EPOCH`) —
