@@ -55,7 +55,7 @@ docker build \
     --build-arg "SOURCE_DATE_EPOCH=$(git -C "${REPO}" log -1 --format=%ct)" \
     -t "${IMAGE}" "${REPO}" >>"${LOG}" 2>&1
 
-say "starting ${NAME} on ${BASE_URL} (read-only, as piapps2 runs it)"
+say "starting ${NAME} on ${BASE_URL} (read-only, as production runs it)"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true
 docker run -d --name "${NAME}" \
     -p "127.0.0.1:${PORT}:80" \

@@ -32,3 +32,6 @@ public/pyodide/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Real host names and addresses behind the docs' placeholders (docs/DEPLOY.md §0)
+docs/deploy.local.env

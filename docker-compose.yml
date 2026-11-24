@@ -1,4 +1,4 @@
-# py-scratchpad (github.com/hexawulf/py-scratchpad) on piapps2.
+# py-scratchpad (github.com/hexawulf/py-scratchpad), production compose file.
 # No data: everything the user types lives in their browser's localStorage.
 # Update deliberately: change the pinned tag, then `docker compose pull` and
 # `docker compose up -d`. The tag is pinned, so watchtower must skip it.
@@ -6,9 +6,10 @@
 # Local test builds use docker-compose.dev.yml alongside this file; see
 # docs/DEPLOY.md §3.
 #
-# The port is bound to the piapps2 LAN address only (192.168.50.120, the eth0
-# address — never .179/wlan0). piapps nginx proxies to it; nothing else should
-# reach the container.
+# The port is bound to the deploy host's wired LAN address only, read from
+# PY_SCRATCHPAD_BIND_ADDR in the gitignored .env beside this file (never the
+# Wi-Fi address). The edge nginx proxies to it; nothing else should reach the
+# container. Without .env it binds to 127.0.0.1, so it fails closed.
 #
 # read_only: the nginx entrypoint tolerates a read-only rootfs (its
 # 10-listen-on-ipv6-by-default.sh test-writes default.conf and skips when that
@@ -20,7 +21,7 @@ services:
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
-      - "192.168.50.120:5040:80"
+      - "${PY_SCRATCHPAD_BIND_ADDR:-127.0.0.1}:5040:80"
     mem_limit: 64m
     read_only: true
     tmpfs:

@@ -3,15 +3,15 @@
 #   docker compose -f <clone>/docker-compose.yml \
 #                  -f <clone>/docker-compose.dev.yml up -d --build
 #
-# NEVER run this in /home/zk/bots/py-scratchpad on piapps2: that is the
+# NEVER run this in the deploy directory on the production host: that is the
 # production compose project, and the same service/container_name would replace
-# the live container. On piapps2 use `npm run test:e2e:image` (port 5041).
+# the live container. There, use `npm run test:e2e:image` (port 5041).
 #
 # It builds the working tree instead of pulling the pinned release, tags the
 # result py-scratchpad:dev so it can never be confused with a published image,
-# and binds the port to loopback — 192.168.50.120 is piapps2's address and does
+# and binds the port to loopback — the production bind address (from .env) does
 # not exist on a workstation. `ports: !override` replaces the list; a plain
-# entry would be *appended* to it and compose would still try the .120 bind.
+# entry would be *appended* to it and compose would still try the production bind.
 services:
   py-scratchpad:
     build:

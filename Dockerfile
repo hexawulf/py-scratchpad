@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # py-scratchpad — static site image.
 # Stage 1 builds dist/ with Vite; stage 2 serves it with nginx. Both base images
-# are multi-arch (linux/amd64 for linuxsvr, linux/arm64 for piapps2) and pinned
+# are multi-arch (linux/amd64 for x86 workstations, linux/arm64 for the Pi deploy host) and pinned
 # to an exact patch version so a rebuild is reproducible.
 #
 #   docker buildx build --platform linux/amd64,linux/arm64 -t 0xwulf/py-scratchpad .

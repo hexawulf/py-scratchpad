@@ -214,7 +214,7 @@ test('a second input() is asked with its own prompt, not every earlier one', asy
 
 /**
  * The other half of Part C: what the page does where it is **not** isolated —
- * `http://192.168.50.120:5040`, say. The headers are stripped on the way
+ * a plain-HTTP LAN address, say. The headers are stripped on the way
  * through, which is the only way to get a non-isolated document out of a
  * server that sets them, and leaves everything else identical.
  */

@@ -245,7 +245,7 @@ playwright.config.ts            the smoke test's config (preview server, chromiu
 playwright.screenshots.config.ts  the screenshot run's config
 public/             static assets copied verbatim into dist/
 docs/PLAN.md        full build plan (scope, stack, deploy, acceptance checks)
-docs/DEPLOY.md      release and deploy runbook for piapps2
+docs/DEPLOY.md      release and deploy runbook
 docs/DOCKERHUB.md   the Docker Hub overview text
 docs/screenshots/   the images in this README
 CLAUDE.md           project rules for Claude Code sessions

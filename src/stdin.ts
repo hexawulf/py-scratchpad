@@ -10,7 +10,7 @@
  * `SharedArrayBuffer`, which only exists when the document is **cross-origin
  * isolated** (`Cross-Origin-Opener-Policy: same-origin` plus
  * `Cross-Origin-Embedder-Policy: require-corp`, and a secure context). Where
- * it is not — `http://192.168.50.120:5040`, for instance — the page falls back
+ * it is not — a plain-HTTP LAN address, for instance — the page falls back
  * to supplying the lines before the run starts, and this module is unused.
  *
  * Layout, one buffer:

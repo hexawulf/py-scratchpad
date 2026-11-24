@@ -1,12 +1,12 @@
 ---
-title: py-scratchpad — release and deploy on piapps2
+title: py-scratchpad — release and deploy on $APP_HOST
 author: 0xWulf
 created: 2026-10-09
-hosts: [piapps2]
+hosts: [app-host]
 tags: [homelab, docker, dockerhub, nginx, py-scratchpad, runbook]
 ---
 
-# py-scratchpad — release and deploy (piapps2)
+# py-scratchpad — release and deploy ($APP_HOST)
 
 Static site, no backend and no server-side state. Everything the user types
 lives in their browser's `localStorage` under `py-scratchpad:v1`, so the
@@ -17,19 +17,35 @@ first Run. It is still static files: the Python runs in the user's tab, not
 here.
 
 The image is built by GitHub Actions on a pushed tag and published to Docker
-Hub. piapps2 **pulls a pinned tag** and never builds; it holds one file.
+Hub. $APP_HOST **pulls a pinned tag** and never builds; it holds one file.
 
 | Thing | Value |
 |---|---|
-| Host | piapps2, `192.168.50.120` (eth0 — never `.179`/wlan0) |
-| Compose file | `/home/zk/bots/py-scratchpad/docker-compose.yml` (the repo's own file: that directory is the source clone) |
+| Host | $APP_HOST, `$APP_HOST_IP` (wired interface only, never Wi-Fi) |
+| Compose file | `~/bots/py-scratchpad/docker-compose.yml` (the repo's own file: that directory is the source clone) |
 | Container | `py-scratchpad` |
 | Image | `0xwulf/py-scratchpad:X.Y.Z` — pinned, so watchtower is opted out |
-| LAN endpoint | `http://192.168.50.120:5040/` |
+| LAN endpoint | `http://$APP_HOST_IP:5040/` |
 | Public URL | `https://py-scratchpad.com` (+ `www`, which 301s to the apex) |
 | Also served at | `https://python.piapps.dev` — the original host, unchanged, no redirect |
 
-Both public hostnames are piapps nginx vhosts proxying the same container. See §6.
+Both public hostnames are $EDGE_HOST nginx vhosts proxying the same container. See §6.
+
+**Placeholders.** This repo is public, so host names and addresses are written
+as shell variables: `$APP_HOST` (ssh alias of the host that runs the
+container), `$APP_HOST_IP` (its LAN address), `$EDGE_HOST` / `$EDGE_HOST_IP`
+(the nginx + TLS host), `$ORIGIN_WAN_IP` (the Cloudflare-proxied origin) and
+`$WORKSTATION`. The real values live in `docs/deploy.local.env` on the deploy
+host, which is gitignored. Load it once per shell before running anything
+below:
+
+```
+. ~/bots/py-scratchpad/docs/deploy.local.env
+```
+
+The compose port binding reads `PY_SCRATCHPAD_BIND_ADDR` from the gitignored
+`.env` beside `docker-compose.yml`. Without it, the container binds to
+`127.0.0.1` and the edge proxy cannot reach it (it fails closed).
 
 All commands use `docker compose -f` with an absolute path, so they work from
 any working directory.
@@ -38,10 +54,10 @@ any working directory.
 
 ## 1. Cutting a release
 
-Run on piapps2, in `/home/zk/bots/py-scratchpad`. That directory is both the
+Run on $APP_HOST, in `~/bots/py-scratchpad`. That directory is both the
 **only source clone** and the deploy directory: the repo's `docker-compose.yml`
 is the file the production container runs from. No source clone lives on a
-workstation (moved off linuxsvr 2026-11-21).
+workstation (moved off $WORKSTATION 2026-11-21).
 
 **1.1 Pass the local gate.**
 
@@ -68,7 +84,7 @@ release and `ci.yml` does not do it:
 npm run test:e2e:image
 ```
 
-It builds the image, runs it read-only as piapps2 does, asserts the
+It builds the image, runs it read-only as $APP_HOST does, asserts the
 Content-Type of all six runtime files, and runs the browser suite against
 **nginx** rather than against `vite preview`.
 
@@ -134,12 +150,12 @@ docker buildx imagetools inspect 0xwulf/py-scratchpad:0.1.1
 
 `linux/amd64` and `linux/arm64` must both appear. The two
 `unknown/unknown` entries are the SBOM and provenance attestations and are
-expected. The workflow also moves `:X.Y` and `:latest`; piapps2 pins the full
+expected. The workflow also moves `:X.Y` and `:latest`; $APP_HOST pins the full
 `:X.Y.Z` regardless, so nothing on the host floats.
 
 ---
 
-## 2. Deploying to piapps2
+## 2. Deploying to $APP_HOST
 
 **2.1 The pinned tag is already in place.** There is one copy of
 `docker-compose.yml`: the deploy directory is the repo clone, so the tag bumped
@@ -147,7 +163,7 @@ in §1.2 and committed in §1.3 is what §2.2 pulls. Check it, and check the clo
 matches `origin/main`:
 
 ```
-cd /home/zk/bots/py-scratchpad ; git fetch -q origin ; git status -sb ; grep -n 'image:' /home/zk/bots/py-scratchpad/docker-compose.yml
+cd ~/bots/py-scratchpad ; git fetch -q origin ; git status -sb ; grep -n 'image:' ~/bots/py-scratchpad/docker-compose.yml
 ```
 
 Do not run §2.2/§2.3 before §1.7 has confirmed the image exists: between the
@@ -157,29 +173,29 @@ not have yet (a failed pull leaves the running container as it is).
 **2.2 Pull the image.** The running container keeps serving while this runs.
 
 ```
-ssh piapps2 'docker compose -f /home/zk/bots/py-scratchpad/docker-compose.yml pull'
+ssh "$APP_HOST" 'docker compose -f ~/bots/py-scratchpad/docker-compose.yml pull'
 ```
 
 **2.3 Recreate the container.**
 
 ```
-ssh piapps2 'docker compose -f /home/zk/bots/py-scratchpad/docker-compose.yml up -d'
+ssh "$APP_HOST" 'docker compose -f ~/bots/py-scratchpad/docker-compose.yml up -d'
 ```
 
 **2.4 Verify on the host.** The container must report `healthy`, keep its
 read-only rootfs, run the expected image digest, and stay under the 64 MB cap.
 
 ```
-ssh piapps2 'docker compose -f /home/zk/bots/py-scratchpad/docker-compose.yml ps ; docker inspect -f "health={{.State.Health.Status}} read_only={{.HostConfig.ReadonlyRootfs}} mem={{.HostConfig.Memory}} image={{.Config.Image}}" py-scratchpad ; docker stats --no-stream py-scratchpad'
+ssh "$APP_HOST" 'docker compose -f ~/bots/py-scratchpad/docker-compose.yml ps ; docker inspect -f "health={{.State.Health.Status}} read_only={{.HostConfig.ReadonlyRootfs}} mem={{.HostConfig.Memory}} image={{.Config.Image}}" py-scratchpad ; docker stats --no-stream py-scratchpad'
 ```
 
 **2.5 Verify over the LAN.** This is the real check: it proves the
-`192.168.50.120:5040` binding, the headers and the cache policy.
+`$APP_HOST_IP:5040` binding, the headers and the cache policy.
 
 ```
-curl -sI http://192.168.50.120:5040/
-curl -s http://192.168.50.120:5040/ | grep -o '<title>[^<]*</title>'
-curl -s -o /dev/null -w 'status=%{http_code}\n' http://192.168.50.120:5040/does-not-exist
+curl -sI http://$APP_HOST_IP:5040/
+curl -s http://$APP_HOST_IP:5040/ | grep -o '<title>[^<]*</title>'
+curl -s -o /dev/null -w 'status=%{http_code}\n' http://$APP_HOST_IP:5040/does-not-exist
 ```
 
 Expected:
@@ -200,17 +216,17 @@ Expected:
 Get the current hashed filename from the page itself:
 
 ```
-curl -s http://192.168.50.120:5040/ | grep -o '/assets/[^"]*\.js'
+curl -s http://$APP_HOST_IP:5040/ | grep -o '/assets/[^"]*\.js'
 ```
 
 **2.5b The Pyodide runtime (0.3.0 and later).** Three things have to be right
 or the first Run fails, and none of them is visible on `/`:
 
 ```
-V=$(curl -s http://192.168.50.120:5040/assets/index-*.js 2>/dev/null | grep -o '/pyodide/[0-9.]*/' | head -n1)
-curl -sI "http://192.168.50.120:5040${V}pyodide.asm.wasm"
-curl -sI -H 'Accept-Encoding: gzip' "http://192.168.50.120:5040${V}pyodide.asm.wasm" | grep -i content-encoding
-for f in pyodide.mjs pyodide-lock.json pyodide.asm.mjs pyodide.asm.wasm python_stdlib.zip LICENSE ; do printf '%-20s ' "$f" ; curl -s -o /dev/null -w '%{http_code}\n' "http://192.168.50.120:5040${V}${f}" ; done
+V=$(curl -s http://$APP_HOST_IP:5040/assets/index-*.js 2>/dev/null | grep -o '/pyodide/[0-9.]*/' | head -n1)
+curl -sI "http://$APP_HOST_IP:5040${V}pyodide.asm.wasm"
+curl -sI -H 'Accept-Encoding: gzip' "http://$APP_HOST_IP:5040${V}pyodide.asm.wasm" | grep -i content-encoding
+for f in pyodide.mjs pyodide-lock.json pyodide.asm.mjs pyodide.asm.wasm python_stdlib.zip LICENSE ; do printf '%-20s ' "$f" ; curl -s -o /dev/null -w '%{http_code}\n' "http://$APP_HOST_IP:5040${V}${f}" ; done
 ```
 
 Expected — **and the `type=` of every file matters, not just the wasm's**:
@@ -240,7 +256,7 @@ changes the path rather than the contents of one — no cache anywhere needs
 purging, and the old path simply stops being requested.
 
 **2.6 After a release that changes headers or caching,** re-check through the
-public vhost too, since piapps nginx must pass the container's headers through
+public vhost too, since $EDGE_HOST nginx must pass the container's headers through
 without adding its own:
 
 Both public hostnames, since each is a separate vhost:
@@ -264,10 +280,10 @@ Both counts must be `1` on both hostnames.
 Headers being present is not proof that the browser agreed to isolate the
 document, so ask one. `playwright.config.ts` starts its own preview server and
 cannot be pointed at production, so this is a one-off, run from the repo on
-piapps2 (Chromium comes from `npx playwright install chromium`):
+$APP_HOST (Chromium comes from `npx playwright install chromium`):
 
 ```
-cd /home/zk/bots/py-scratchpad
+cd ~/bots/py-scratchpad
 node --input-type=module -e 'import {chromium} from "playwright"; const b = await chromium.launch(); const p = await b.newPage(); for (const u of ["https://py-scratchpad.com/", "https://python.piapps.dev/"]) { await p.goto(u); console.log(u, "crossOriginIsolated =", await p.evaluate(() => window.crossOriginIsolated)); } await b.close()'
 ```
 
@@ -280,19 +296,19 @@ browser — **widen nothing in the CSP to compensate**; find the header.
 
 ## 3. Local development build
 
-piapps2's compose file pulls a pinned release and has no `build:`.
+$APP_HOST's compose file pulls a pinned release and has no `build:`.
 
-**Never use `docker-compose.dev.yml` in `/home/zk/bots/py-scratchpad`.** That
+**Never use `docker-compose.dev.yml` in `~/bots/py-scratchpad`.** That
 directory is the production compose project, and the override keeps the same
 service and `container_name: py-scratchpad`, so `up` would rebuild and
 **replace the live container** with the working tree.
 
-To run the working tree as an image on piapps2, use the image test instead. It
+To run the working tree as an image on $APP_HOST, use the image test instead. It
 builds `py-scratchpad:e2e`, runs it as `py-scratchpad-e2e` on
 `127.0.0.1:5041` beside production, runs the browser suite and removes it:
 
 ```
-cd /home/zk/bots/py-scratchpad ; npm run test:e2e:image
+cd ~/bots/py-scratchpad ; npm run test:e2e:image
 ```
 
 The dev override is only for a throwaway clone on another machine, where no
@@ -313,11 +329,11 @@ In order, least to most destructive. There is no data to lose at any point.
 **4.1 Stop the service.** Releases port 5040, keeps everything else.
 
 ```
-ssh piapps2 'docker compose -f /home/zk/bots/py-scratchpad/docker-compose.yml down'
+ssh "$APP_HOST" 'docker compose -f ~/bots/py-scratchpad/docker-compose.yml down'
 ```
 
 **4.2 Pin the previous version.** Back up
-`/home/zk/bots/py-scratchpad/docker-compose.yml`, edit its tag back to the last
+`~/bots/py-scratchpad/docker-compose.yml`, edit its tag back to the last
 good `X.Y.Z` (§2.1) with nano, then `pull` and `up -d`. There is one copy of the
 file, so this leaves the clone dirty until a commit reverts the tag on `main`. Published tags are immutable, so
 the earlier image is still there. This is the normal rollback.
@@ -326,7 +342,7 @@ the earlier image is still there. This is the normal rollback.
 problem, build the previous tag on the host instead:
 
 ```
-ssh piapps2 'git clone --branch v0.1.0 --depth 1 git@github.com:hexawulf/py-scratchpad.git /home/zk/bots/py-scratchpad-src ; docker build -t py-scratchpad:fallback /home/zk/bots/py-scratchpad-src'
+ssh "$APP_HOST" 'git clone --branch v0.1.0 --depth 1 git@github.com:hexawulf/py-scratchpad.git ~/bots/py-scratchpad-src ; docker build -t py-scratchpad:fallback ~/bots/py-scratchpad-src'
 ```
 
 Then point the compose file's `image:` at `py-scratchpad:fallback` and `up -d`.
@@ -335,7 +351,7 @@ Then point the compose file's `image:` at `py-scratchpad:fallback` and `up -d`.
 locally was moved aside, not deleted:
 
 ```
-ssh piapps2 'ls -ld /home/zk/backups/py-scratchpad.bak_*'
+ssh "$APP_HOST" 'ls -ld ~/backups/py-scratchpad.bak_*'
 ```
 
 That directory still carries the old `build:`-style compose file and the full
@@ -345,7 +361,7 @@ reproduces the pre-release deployment exactly.
 **4.5 Drop an image.** Only after a `down`; the next `pull` fetches it again.
 
 ```
-ssh piapps2 'docker image rm 0xwulf/py-scratchpad:0.1.0'
+ssh "$APP_HOST" 'docker image rm 0xwulf/py-scratchpad:0.1.0'
 ```
 
 **4.6 Deleting the backup directory or a Docker Hub tag** needs operator
@@ -353,9 +369,9 @@ confirmation and is never part of a rollback.
 
 ---
 
-## 6. Public ingress (piapps nginx vhosts)
+## 6. Public ingress ($EDGE_HOST nginx vhosts)
 
-**Production nginx on piapps is an operator approval gate** — read this section, then propose,
+**Production nginx on $EDGE_HOST is an operator approval gate** — read this section, then propose,
 then wait for approval before touching it.
 
 Two vhosts proxy the same container. Neither redirects to the other, and that is deliberate:
@@ -368,10 +384,10 @@ Redirecting the old host would silently hide a user's files.
 | Vhost file | `/etc/nginx/sites-available/py-scratchpad.com` | `/etc/nginx/sites-available/python.piapps.dev` |
 | In repo | `docs/nginx/py-scratchpad.com` | not under version control |
 | Names | apex + `www` (`www` 301s to apex) | single name |
-| Backend | `proxy_pass http://192.168.50.120:5040` | same |
+| Backend | `proxy_pass http://$APP_HOST_IP:5040` | same |
 | TLS | **dedicated** `py-scratchpad.com`, ECDSA P-256, SAN apex + `www`, expires 2027-01-07 | **shared wildcard** `piapps.dev-0001` |
 | ACME | HTTP-01, `authenticator = webroot`, `/var/www/letsencrypt` | DNS-01, `authenticator = dns-cloudflare` |
-| Cloudflare | zone `py-scratchpad.com`, apex + `www` A → `122.116.150.249`, Proxied, SSL Full (strict) | zone `piapps.dev`, same IP, Proxied, Full (strict) |
+| Cloudflare | zone `py-scratchpad.com`, apex + `www` A → `$ORIGIN_WAN_IP`, Proxied, SSL Full (strict) | zone `piapps.dev`, same IP, Proxied, Full (strict) |
 | Monitor | Uptime Kuma id 60, `py-scratchpad`, keyword `py-scratchpad` | unmonitored since the move |
 
 Reference each was copied from: `python.piapps.dev` came from `stocky.piapps.dev`;
@@ -380,7 +396,7 @@ structured as in `doubletrees.app` (a separate server block, not the `if ($host 
 that `linuxsvr.org` uses).
 
 **No `add_header` belongs in either vhost.** The container owns the security headers
-(`docker/security-headers.conf`) and nothing on piapps adds headers at http level, in `conf.d/`
+(`docker/security-headers.conf`) and nothing on $EDGE_HOST adds headers at http level, in `conf.d/`
 or in `snippets/`. An `add_header` here would make each one appear **twice** on the public URL
 — and for `Cross-Origin-Embedder-Policy` (new in 0.3.0) a duplicate does not merely look
 untidy: the browser refuses to isolate the document, and `SharedArrayBuffer` disappears.
@@ -420,10 +436,10 @@ How it was issued (2026-10-09), and the order that matters — **the cert must e
 curl -s -o /dev/null -w '%{http_code}\n' http://py-scratchpad.com/.well-known/acme-challenge/health
 curl -s -o /dev/null -w '%{http_code}\n' http://www.py-scratchpad.com/.well-known/acme-challenge/health
 
-ssh piapps 'sudo certbot certonly --non-interactive --agree-tos --webroot --webroot-path /var/www/letsencrypt --key-type ecdsa --cert-name py-scratchpad.com -d py-scratchpad.com -d www.py-scratchpad.com --deploy-hook "systemctl reload nginx"'
+ssh "$EDGE_HOST" 'sudo certbot certonly --non-interactive --agree-tos --webroot --webroot-path /var/www/letsencrypt --key-type ecdsa --cert-name py-scratchpad.com -d py-scratchpad.com -d www.py-scratchpad.com --deploy-hook "systemctl reload nginx"'
 
 # stage 2: install the full vhost (adds the two 443 blocks), nginx -t, reload
-ssh piapps 'sudo certbot renew --dry-run --cert-name py-scratchpad.com'
+ssh "$EDGE_HOST" 'sudo certbot renew --dry-run --cert-name py-scratchpad.com'
 ```
 
 `--deploy-hook` is what writes `renew_hook` into the renewal config.
@@ -431,7 +447,7 @@ ssh piapps 'sudo certbot renew --dry-run --cert-name py-scratchpad.com'
 **Every redirect in this vhost lives in a `location /`, never at server level.** That is not a
 style choice. nginx runs a server-level `return 301` in the **server-rewrite phase, before
 location selection**, which makes `location ^~ /.well-known/acme-challenge/` unreachable in that
-block. Measured on piapps, asking for the file that exists:
+block. Measured on $EDGE_HOST, asking for the file that exists:
 
 ```
 containeryard.org   /.well-known/acme-challenge/health -> 200   (redirect in `location /`)
@@ -450,24 +466,27 @@ after Cloudflare's `always_use_https` starts answering port 80 at the edge.
 ### 6.2 Changing a vhost
 
 Never edit in place. Write the file locally, copy it, install it, then test and reload.
-For `py-scratchpad.com` the local source is in this repo:
+For `py-scratchpad.com` the local source is in this repo. It is a template: `envsubst` fills in
+`$APP_HOST_IP` (load `docs/deploy.local.env` first), and the `grep` shows the rendered backend
+before anything is installed:
 
 ```
-scp /home/zk/bots/py-scratchpad/docs/nginx/py-scratchpad.com piapps:/tmp/py-scratchpad.com
-ssh piapps 'sudo nginx -T > /home/zk/backups/piapps-nginx-T.bak_$(date +%Y%m%d_%H%M%S)'
-ssh piapps 'sudo install -m 644 -o root -g root /tmp/py-scratchpad.com /etc/nginx/sites-available/py-scratchpad.com'
-ssh piapps 'sudo nginx -t'
-ssh piapps 'sudo systemctl reload nginx'
-ssh piapps 'sudo journalctl -u nginx --since "5 min ago" --no-pager ; rm -f /tmp/py-scratchpad.com'
+envsubst '$APP_HOST_IP' < ~/bots/py-scratchpad/docs/nginx/py-scratchpad.com | ssh "$EDGE_HOST" 'cat > /tmp/py-scratchpad.com'
+ssh "$EDGE_HOST" 'grep -n proxy_pass /tmp/py-scratchpad.com'
+ssh "$EDGE_HOST" 'sudo nginx -T > ~/backups/edge-nginx-T.bak_$(date +%Y%m%d_%H%M%S)'
+ssh "$EDGE_HOST" 'sudo install -m 644 -o root -g root /tmp/py-scratchpad.com /etc/nginx/sites-available/py-scratchpad.com'
+ssh "$EDGE_HOST" 'sudo nginx -t'
+ssh "$EDGE_HOST" 'sudo systemctl reload nginx'
+ssh "$EDGE_HOST" 'sudo journalctl -u nginx --since "5 min ago" --no-pager ; rm -f /tmp/py-scratchpad.com'
 ```
 
 On a first install, add the symlink between `install` and `nginx -t`:
 
 ```
-ssh piapps 'sudo ln -s /etc/nginx/sites-available/py-scratchpad.com /etc/nginx/sites-enabled/py-scratchpad.com'
+ssh "$EDGE_HOST" 'sudo ln -s /etc/nginx/sites-available/py-scratchpad.com /etc/nginx/sites-enabled/py-scratchpad.com'
 ```
 
-`reload`, never `restart` — a restart drops every other site on piapps with it.
+`reload`, never `restart` — a restart drops every other site on $EDGE_HOST with it.
 
 **Always regression-check the other vhosts afterwards.** They share the process:
 
@@ -482,8 +501,8 @@ Expected, unchanged: `stocky 200`, `kuma 302`, `piapps.dev 200`, `python.piapps.
 Removing the symlink is the whole rollback; the `sites-available` file and the certificate stay.
 
 ```
-ssh piapps 'sudo rm /etc/nginx/sites-enabled/py-scratchpad.com'
-ssh piapps 'sudo nginx -t ; sudo systemctl reload nginx'
+ssh "$EDGE_HOST" 'sudo rm /etc/nginx/sites-enabled/py-scratchpad.com'
+ssh "$EDGE_HOST" 'sudo nginx -t ; sudo systemctl reload nginx'
 ```
 
 The hostname then returns Cloudflare **525** — the `443 default_server` has
@@ -509,8 +528,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   — that is the anti-rewriting guard, not a caching detail; see the Cloudflare bullet below.
 - the certificate, per name:
   ```
-  echo | openssl s_client -connect 192.168.50.102:443 -servername py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
-  echo | openssl s_client -connect 192.168.50.102:443 -servername www.py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
+  echo | openssl s_client -connect $EDGE_HOST_IP:443 -servername py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
+  echo | openssl s_client -connect $EDGE_HOST_IP:443 -servername www.py-scratchpad.com 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName
   ```
 - **Each security header must appear exactly once.** Count them, don't eyeball presence.
   The two cross-origin ones are in the list since 0.3.0: a duplicated
@@ -552,7 +571,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   Then hash the **browser-shaped** response against the origin, not the bare one:
   ```
   for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | sha256sum ; done
-  ssh piapps 'curl -s http://192.168.50.120:5040/ | sha256sum'
+  ssh "$EDGE_HOST" "curl -s http://$APP_HOST_IP:5040/ | sha256sum"
   ```
   All three hashes must match. And confirm the directive actually arrives:
   ```
@@ -562,8 +581,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
 - `curl -sI http://py-scratchpad.com` returns 301 from the **Cloudflare edge** once
   `always_use_https` is on, so it does not prove the origin. For that, ask the origin directly:
   ```
-  curl -sI -H 'Host: py-scratchpad.com' http://192.168.50.102/
-  curl -sI -H 'Host: www.py-scratchpad.com' http://192.168.50.102/
+  curl -sI -H 'Host: py-scratchpad.com' http://$EDGE_HOST_IP/
+  curl -sI -H 'Host: www.py-scratchpad.com' http://$EDGE_HOST_IP/
   ```
   Both must be `301` to `https://py-scratchpad.com/`.
 
@@ -571,7 +590,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
 
 ## 7. Notes
 
-- **Ingress, DNS and monitoring:** both piapps nginx vhosts are §6 above. The Cloudflare
+- **Ingress, DNS and monitoring:** both $EDGE_HOST nginx vhosts are §6 above. The Cloudflare
   `python` record and the Uptime Kuma monitor were set up on 2026-10-09; the
   `py-scratchpad.com` zone, its certificate and the monitor's new URL followed the same day.
   None of it needs routine maintenance — the one dated item is the `py-scratchpad.com`
@@ -579,8 +598,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
 - **`*.py-scratchpad.com` is a wildcard A record** on that zone, pointing at the same WAN IP.
   No vhost claims those names and the certificate does not cover them, so any unused
   subdomain returns Cloudflare 525. Harmless, but it is not a feature.
-- **piapps2 holds the only source clone** (since 2026-11-21), and it is also the
-  deploy directory: `/home/zk/bots/py-scratchpad/docker-compose.yml` is the
+- **$APP_HOST holds the only source clone** (since 2026-11-21), and it is also the
+  deploy directory: `~/bots/py-scratchpad/docker-compose.yml` is the
   file production runs from, so `git pull` there is what moves the pinned tag
   (§2.1). Never run `docker-compose.dev.yml` in it (§3).
 - **Base images are pinned exactly** in the `Dockerfile` as build args
@@ -598,13 +617,13 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   `vite build`, plus `vendor/pyodide/LICENSE`. So the runtime version is
   whatever `package-lock.json` pins, and `npm ci` inside the Docker build is
   what fetches it. Bumping it is a `package.json` edit, a lock-file update and
-  a new `/pyodide/<version>/` path — nothing on piapps2 or piapps changes.
+  a new `/pyodide/<version>/` path — nothing on $APP_HOST or $EDGE_HOST changes.
 - **`mem_limit: 64m` still holds.** nginx gzipping the 9.6 MB `.wasm` measured
   13.8 MiB with five concurrent fetches. The limit does not need raising for
   0.3.0.
 - **The watchtower opt-out label must stay.** The tag is pinned on purpose;
   watchtower would otherwise move the container off the version this file names.
-  (piapps2's watchtower runs with `WATCHTOWER_LABEL_ENABLE=true`, i.e. opt-in,
+  ($APP_HOST's watchtower runs with `WATCHTOWER_LABEL_ENABLE=true`, i.e. opt-in,
   so the label is belt-and-braces.)
 - **Security headers live in `docker/security-headers.conf`** and are included
   by every nginx location that sets an `add_header` of its own. nginx drops all

@@ -45,7 +45,7 @@ function pick<T extends Element>(root: ParentNode, selector: string): T {
  * Copy to the clipboard, reporting whether it worked.
  *
  * `navigator.clipboard` is gated on a secure context, so it simply does not
- * exist on `http://192.168.50.120:5040` — the LAN endpoint this app is also
+ * exist on a plain-HTTP LAN address — the LAN endpoint this app is also
  * served from. The caller falls back to selecting the text.
  */
 async function writeClipboard(text: string): Promise<boolean> {

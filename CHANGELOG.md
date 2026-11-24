@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Docs: stale base-image and Pyodide versions in `docs/DOCKERHUB.md`, and stale "piapps2 is not a git checkout" notes in `docs/DEPLOY.md`.
+- Docs: stale base-image and Pyodide versions in `docs/DOCKERHUB.md`, and stale "the deploy host is not a git checkout" notes in `docs/DEPLOY.md`.
 
 ## [0.3.9] - 2026-11-22
 

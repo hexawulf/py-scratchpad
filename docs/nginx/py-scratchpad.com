@@ -1,6 +1,8 @@
 # /etc/nginx/sites-available/py-scratchpad.com
 # Managed by 0xWulf / HexaWulf homelab
-# Reverse proxy for py-scratchpad on piapps2:5040 — the public home of the app.
+# Reverse proxy for py-scratchpad on the app host, port 5040 — the public home of the app.
+# TEMPLATE: the proxy_pass address below is filled in by envsubst at install time
+# (docs/DEPLOY.md §6.2). Installed as-is, nginx -t rejects it as an unknown variable.
 # Created: 2026-10-09
 #
 # Backend and proxy block copied from python.piapps.dev, which keeps serving
@@ -27,7 +29,7 @@
 # webroot while everything else proxies.
 #
 # No add_header anywhere in this file. The container owns the security headers
-# (docker/security-headers.conf) and nothing on piapps adds headers at http
+# (docker/security-headers.conf) and nothing on the edge host adds headers at http
 # level, in conf.d/ or in snippets/, so an add_header here would make each one
 # appear twice on the public URL. cloudflare_real_ip.conf is likewise already
 # loaded at http level — do not include it per-vhost.
@@ -91,7 +93,7 @@ server {
     }
 
     location / {
-        proxy_pass http://192.168.50.120:5040;
+        proxy_pass http://$APP_HOST_IP:5040;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
