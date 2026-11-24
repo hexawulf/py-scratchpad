@@ -21,6 +21,7 @@ import {
   parseState,
   save,
   type ScratchpadState,
+  type Settings,
   STORAGE_KEY,
   type StorageLike,
   type ThemeName,
@@ -201,7 +202,7 @@ function preferredTheme(): ThemeName {
 
 const loaded = load(storage, { defaultTheme: preferredTheme() })
 let theme: ThemeName = loaded.state.settings.theme
-let fontSize = clampFontSize(loaded.state.settings.fontSize)
+let fontSize = loaded.state.settings.fontSize
 let bufferName = loaded.state.buffer.name
 let runMode: RunMode = loaded.state.settings.runMode
 let fileMeta: FileMeta = {
@@ -439,7 +440,8 @@ window.addEventListener('storage', (event) => {
   })
   if (decision.kind !== 'pause') {
     if (decision.reason === 'same-document' && event.newValue !== null) {
-      adoptSettings(event.newValue)
+      const state = parseState(event.newValue, theme)
+      if (state !== null) adoptSettings(state.settings)
     }
     return
   }
@@ -455,13 +457,10 @@ window.addEventListener('storage', (event) => {
  * mode. Follow it: otherwise this tab's next autosave would put its own
  * settings back, and the two tabs would undo each other on every click.
  */
-function adoptSettings(raw: string): void {
-  const state = parseState(raw, theme)
-  if (state === null) return
-
-  theme = state.settings.theme
-  fontSize = clampFontSize(state.settings.fontSize)
-  runMode = state.settings.runMode
+function adoptSettings(settings: Settings): void {
+  theme = settings.theme
+  fontSize = settings.fontSize
+  runMode = settings.runMode
   applyTheme()
   applyFontSize()
   applyRunMode()
@@ -533,15 +532,8 @@ function reloadFromStorage(): void {
 
   bufferName = result.state.buffer.name
   fileMeta = { lineEnding: result.state.buffer.lineEnding, bom: result.state.buffer.bom }
-  theme = result.state.settings.theme
-  fontSize = clampFontSize(result.state.settings.fontSize)
-  runMode = result.state.settings.runMode
   applyFilename()
-  applyTheme()
-  applyFontSize()
-  applyRunMode()
-  editor.setTheme(theme)
-  editor.setFontSize(fontSize)
+  adoptSettings(result.state.settings)
 
   dirty = false
   conflictPending = false

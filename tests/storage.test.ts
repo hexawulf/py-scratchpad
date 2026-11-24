@@ -275,6 +275,12 @@ describe('cursor clamping', () => {
     expect(clampFontSize(Number.NaN)).toBe(DEFAULT_FONT_SIZE)
     expect(clampFontSize(15.4)).toBe(15)
   })
+
+  it('hands back a stored font size already clamped', () => {
+    const storage = new MemoryStorage()
+    save(storage, { ...stateWith(''), settings: { theme: 'dark', fontSize: 999, runMode: 'repl' } })
+    expect(load(storage).state.settings.fontSize).toBe(FONT_SIZE_MAX)
+  })
 })
 
 describe('corrupt or unknown payloads', () => {
