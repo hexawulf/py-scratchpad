@@ -18,8 +18,26 @@ export function isRunMode(value: unknown): value is RunMode {
 /** What `pyscratch_run` in runner.py reports. */
 export type RunStatus = 'ok' | 'error' | 'interrupt' | 'exit'
 
+export function isRunStatus(value: unknown): value is RunStatus {
+  return value === 'ok' || value === 'error' || value === 'interrupt' || value === 'exit'
+}
+
 /** Which of the panel's three colours a piece of output belongs to. */
 export type OutputStream = 'out' | 'err' | 'in'
+
+/** Maximum length accepted for short protocol strings (error/version/prompt). */
+export const MAX_PROTOCOL_INFO_CHARS = 128
+export const MAX_PROTOCOL_MESSAGE_CHARS = 4096
+
+/**
+ * Valid shape for the Pyodide `indexUrl` passed to the worker: a single
+ * versioned segment under `/pyodide/<version>/`, with no path traversal.
+ */
+const INDEX_URL_PATTERN = /^\/pyodide\/[0-9A-Za-z._-]+\/$/
+
+export function isValidIndexUrl(value: unknown): value is string {
+  return typeof value === 'string' && INDEX_URL_PATTERN.test(value) && !value.includes('..')
+}
 
 export interface RuntimeInfo {
   /** The npm package's version, e.g. `314.0.7`. */
@@ -49,6 +67,13 @@ export interface StartRequest {
    * which case `input()` is fed from `inputLines` instead.
    */
   stdin?: SharedArrayBuffer
+  /**
+   * Optional dedicated reply channel transferred from the page. When present,
+   * the worker replies exclusively on this closure-private port so user Python
+   * code calling `js.postMessage(...)` on the worker global scope cannot spoof
+   * protocol events.
+   */
+  port?: MessagePort
 }
 
 export interface RunRequest {
@@ -112,3 +137,115 @@ export type WorkerEvent =
   | OutputEvent
   | StdinEvent
   | DoneEvent
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer {
+  return typeof SharedArrayBuffer === 'function' && value instanceof SharedArrayBuffer
+}
+
+function isMessagePort(value: unknown): value is MessagePort {
+  return typeof MessagePort === 'function' && value instanceof MessagePort
+}
+
+/**
+ * Runtime validator for messages received by the page from the worker.
+ * Untrusted Python inside Pyodide can reach `js.postMessage(...)` on the
+ * worker global scope, so every field is checked before touching UI state.
+ */
+export function parseWorkerEvent(value: unknown): WorkerEvent | null {
+  if (!isPlainRecord(value) || typeof value.kind !== 'string') return null
+
+  switch (value.kind) {
+    case 'ready': {
+      if (!isPlainRecord(value.info)) return null
+      if (typeof value.info.pyodide !== 'string' || typeof value.info.python !== 'string') {
+        return null
+      }
+      return {
+        kind: 'ready',
+        info: {
+          pyodide: value.info.pyodide.slice(0, MAX_PROTOCOL_INFO_CHARS),
+          python: value.info.python.slice(0, MAX_PROTOCOL_INFO_CHARS),
+        },
+      }
+    }
+
+    case 'failed': {
+      if (typeof value.message !== 'string') return null
+      return {
+        kind: 'failed',
+        message: value.message.slice(0, MAX_PROTOCOL_MESSAGE_CHARS),
+      }
+    }
+
+    case 'output': {
+      if (!isPositiveInt(value.id)) return null
+      if (value.stream !== 'out' && value.stream !== 'err') return null
+      if (typeof value.text !== 'string') return null
+      return { kind: 'output', id: value.id, stream: value.stream, text: value.text }
+    }
+
+    case 'stdin': {
+      if (!isPositiveInt(value.id) || typeof value.prompt !== 'string') return null
+      return { kind: 'stdin', id: value.id, prompt: value.prompt }
+    }
+
+    case 'done': {
+      if (!isPositiveInt(value.id) || !isRunStatus(value.status)) return null
+      if (typeof value.ms !== 'number' || !Number.isFinite(value.ms) || value.ms < 0) return null
+      return { kind: 'done', id: value.id, status: value.status, ms: value.ms }
+    }
+
+    default:
+      return null
+  }
+}
+
+/** Runtime validator for messages received by the worker from the page. */
+export function parseWorkerRequest(value: unknown): WorkerRequest | null {
+  if (!isPlainRecord(value) || typeof value.kind !== 'string') return null
+
+  if (value.kind === 'start') {
+    if (!isValidIndexUrl(value.indexUrl)) return null
+    if (value.interrupt !== undefined && (!isSharedArrayBuffer(value.interrupt) || value.interrupt.byteLength < 1)) {
+      return null
+    }
+    if (value.stdin !== undefined && (!isSharedArrayBuffer(value.stdin) || value.stdin.byteLength < 8)) {
+      return null
+    }
+    if (value.port !== undefined && !isMessagePort(value.port)) return null
+    return {
+      kind: 'start',
+      indexUrl: value.indexUrl,
+      ...(value.interrupt === undefined ? {} : { interrupt: value.interrupt }),
+      ...(value.stdin === undefined ? {} : { stdin: value.stdin }),
+      ...(value.port === undefined ? {} : { port: value.port }),
+    }
+  }
+
+  if (value.kind === 'run') {
+    if (!isPositiveInt(value.id)) return null
+    if (typeof value.source !== 'string' || typeof value.filename !== 'string') return null
+    if (!isRunMode(value.mode)) return null
+    if (!Array.isArray(value.inputLines) || !value.inputLines.every((line) => typeof line === 'string')) {
+      return null
+    }
+    return {
+      kind: 'run',
+      id: value.id,
+      source: value.source,
+      filename: value.filename,
+      mode: value.mode,
+      inputLines: value.inputLines,
+    }
+  }
+
+  return null
+}

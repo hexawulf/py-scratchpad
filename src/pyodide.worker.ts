@@ -30,7 +30,13 @@ import {
   createPromptTracker,
   TRUNCATED_NOTICE,
 } from './output.ts'
-import type { RunRequest, RunStatus, StartRequest, WorkerEvent, WorkerRequest } from './protocol.ts'
+import {
+  parseWorkerRequest,
+  type RunRequest,
+  type RunStatus,
+  type StartRequest,
+  type WorkerEvent,
+} from './protocol.ts'
 import runnerSource from './runner.py?raw'
 import {
   awaitStdinLine,
@@ -52,9 +58,11 @@ interface WorkerScope {
 }
 
 const scope = self as unknown as WorkerScope
+let replyPort: MessagePort | null = null
 
 function post(event: WorkerEvent): void {
-  scope.postMessage(event)
+  if (replyPort !== null) replyPort.postMessage(event)
+  else scope.postMessage(event)
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +71,7 @@ function post(event: WorkerEvent): void {
 
 type PyscratchRun = (source: string, filename: string, mode: string) => string
 
+let started = false
 let pyodide: PyodideInterface | null = null
 let pyscratchRun: PyscratchRun | null = null
 let stdin: StdinViews | null = null
@@ -192,7 +201,11 @@ interface PyodideModule {
 }
 
 async function start(request: StartRequest): Promise<void> {
-  // @vite-ignore: the URL is built from a define, and the module must stay out
+  if (started) return
+  started = true
+  if (request.port !== undefined) replyPort = request.port
+
+  // @vite-ignore: the URL is validated by parseWorkerRequest and stays out
   // of the bundle (see the file comment).
   const module = (await import(/* @vite-ignore */ `${request.indexUrl}pyodide.mjs`)) as PyodideModule
 
@@ -213,13 +226,19 @@ async function start(request: StartRequest): Promise<void> {
 
   installStreams(py)
 
-  // Defines `pyscratch_run`. Executed once, so each later Run is one call.
-  py.runPython(runnerSource)
-
-  // `globals` is a PyProxy, whose `get` is typed `any`; narrowing it here is
-  // what keeps the rest of this file free of unchecked calls.
-  const globals = py.globals as unknown as { get: (name: string) => unknown }
-  const run = globals.get('pyscratch_run')
+  // Load runner.py into a private Python namespace under a dedicated filename
+  // so user code cannot mutate it via `__main__` or collide with `<exec>`.
+  const loader = py.runPython(
+    '(lambda src: (ns := {}, exec(compile(src, "<pyscratch-runner>", "exec"), ns), ns["pyscratch_run"])[2])',
+  ) as unknown
+  if (typeof loader !== 'function') throw new Error('failed to initialize runner.py loader')
+  let run: unknown
+  try {
+    run = (loader as (src: string) => unknown)(runnerSource)
+  } finally {
+    const disposable = loader as { destroy?: () => void }
+    disposable.destroy?.()
+  }
   if (typeof run !== 'function') throw new Error('runner.py did not define pyscratch_run')
 
   const python = py.runPython('import platform; platform.python_version()') as unknown
@@ -276,13 +295,9 @@ function execute(request: RunRequest): void {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-function isWorkerRequest(value: unknown): value is WorkerRequest {
-  return typeof value === 'object' && value !== null && 'kind' in value
-}
-
 scope.addEventListener('message', (event) => {
-  if (!isWorkerRequest(event.data)) return
-  const request = event.data
+  const request = parseWorkerRequest(event.data)
+  if (request === null) return
 
   if (request.kind === 'start') {
     start(request).catch((error: unknown) => {

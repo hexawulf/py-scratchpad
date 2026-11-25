@@ -11,6 +11,7 @@ import {
   linkifyOutput,
   OUTPUT_MAX_CHARS,
   OUTPUT_MAX_LINES,
+  PROMPT_MAX_CHARS,
   shouldFlush,
 } from '../src/output.ts'
 
@@ -207,6 +208,17 @@ describe('the input() prompt', () => {
     prompt.write('left over')
     prompt.reset()
     expect(prompt.take()).toBe('')
+  })
+
+  it('caps newline-free stdout so a runaway print loop cannot exhaust memory', () => {
+    const prompt = createPromptTracker()
+
+    for (let i = 0; i < 100; i += 1) prompt.write('x'.repeat(100))
+    prompt.write('tail: ')
+
+    const taken = prompt.take()
+    expect(taken).toHaveLength(PROMPT_MAX_CHARS)
+    expect(taken.endsWith('tail: ')).toBe(true)
   })
 })
 

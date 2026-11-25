@@ -198,6 +198,13 @@ export function createFlushPolicy(eagerWrites: number = EAGER_WRITES): FlushPoli
  * total: reading it has to consume it, or the next `input()` in the same
  * program is handed everything printed before it too.
  */
+/**
+ * Hard ceiling on the prompt retained for the inline `input()` label.
+ * Without a cap, a newline-free stdout loop bypasses `OutputLimiter` and
+ * grows `pending` until the worker OOMs or freezes the UI.
+ */
+export const PROMPT_MAX_CHARS = 512
+
 export interface PromptTracker {
   /** Record text written to stdout. */
   write(text: string): void
@@ -207,14 +214,15 @@ export interface PromptTracker {
   reset(): void
 }
 
-export function createPromptTracker(): PromptTracker {
+export function createPromptTracker(maxChars: number = PROMPT_MAX_CHARS): PromptTracker {
   let pending = ''
 
   return {
     write(text) {
       if (text === '') return
       const lastBreak = text.lastIndexOf('\n')
-      pending = lastBreak === -1 ? pending + text : text.slice(lastBreak + 1)
+      const combined = lastBreak === -1 ? pending + text : text.slice(lastBreak + 1)
+      pending = combined.length > maxChars ? combined.slice(combined.length - maxChars) : combined
     },
 
     take() {

@@ -11,14 +11,22 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { RunStatus, WorkerEvent } from '../src/protocol.ts'
+import {
+  parseWorkerEvent,
+  parseWorkerRequest,
+  type RunStatus,
+  type WorkerEvent,
+} from '../src/protocol.ts'
+import { OUTPUT_MAX_CHARS, PROMPT_MAX_CHARS } from '../src/output.ts'
 import { createRunner, type RunnerPhase, type RunParams, STOP_GRACE_MS } from '../src/runner.ts'
+import { beginStdinWait, stdinViews } from '../src/stdin.ts'
 
 const SIGINT = 2
 
 interface StartMessage {
   kind: 'start'
   interrupt?: SharedArrayBuffer
+  stdin?: SharedArrayBuffer
 }
 
 interface RunMessage {
@@ -43,9 +51,9 @@ class FakeWorker {
     this.terminated = true
   }
 
-  /** Deliver a message from the "worker" to the page. */
-  emit(event: WorkerEvent): void {
-    for (const listener of this.listeners) listener({ data: event })
+  /** Deliver a message from the "worker" to the page (allows malformed payloads in tests). */
+  emit(event: unknown): void {
+    for (const listener of this.listeners) listener({ data: event as WorkerEvent })
   }
 
   ready(): void {
@@ -220,5 +228,104 @@ describe('Stop', () => {
     expect(workers).toHaveLength(2)
     expect(workers[0]?.terminated).toBe(true)
     expect(workers[1]?.interruptByte).toBe(0)
+  })
+})
+
+describe('protocol validation and worker isolation', () => {
+  it('ignores malformed worker events and invalid streams without throwing', () => {
+    const { runner, latest, output, done, errors } = harness()
+    runner.run(PARAMS)
+    const worker = latest()
+    worker.ready()
+
+    worker.emit(null)
+    worker.emit('not-an-object')
+    worker.emit({ kind: 'unknown' })
+    worker.emit({ kind: 'output', id: worker.lastRunId, stream: 'out injected', text: 'bad' })
+    worker.emit({ kind: 'output', id: worker.lastRunId, stream: 'out', text: 123 })
+    worker.emit({ kind: 'done', id: worker.lastRunId, status: 'bogus', ms: 1 })
+    worker.emit({ kind: 'done', id: worker.lastRunId, status: 'ok', ms: Number.NaN })
+
+    expect(output).toEqual([])
+    expect(done).toEqual([])
+    expect(errors).toEqual([])
+    expect(runner.phase).toBe('running')
+  })
+
+  it('rejects forged ready events while a run is active', () => {
+    const { runner, latest } = harness()
+    runner.run(PARAMS)
+    const worker = latest()
+    worker.ready()
+    expect(runner.phase).toBe('running')
+
+    // A spoofed ready event during an active run must not reset phase to ready.
+    worker.emit({ kind: 'ready', info: { pyodide: 'fake', python: 'fake' } })
+    expect(runner.phase).toBe('running')
+  })
+
+  it('rejects forged stdin events when the stdin SAB is not awaiting input', () => {
+    const prompts: string[] = []
+    const workers: FakeWorker[] = []
+    const runner = createRunner({
+      indexUrl: '/pyodide/test/',
+      onPhase: () => undefined,
+      onOutput: () => undefined,
+      onStdinPrompt: (prompt) => prompts.push(prompt),
+      onDone: () => undefined,
+      onReady: () => undefined,
+      onError: () => undefined,
+      createWorker: () => {
+        const w = new FakeWorker()
+        workers.push(w)
+        return w as unknown as Worker
+      },
+    })
+
+    runner.run(PARAMS)
+    const worker = workers[0]
+    if (worker === undefined) throw new Error('expected worker')
+    worker.ready()
+
+    // Without beginStdinWait on the SAB, forged stdin events must be dropped.
+    worker.emit({ kind: 'stdin', id: worker.lastRunId, prompt: 'spoof: ' })
+    expect(runner.phase).toBe('running')
+    expect(prompts).toEqual([])
+
+    // When genuinely awaiting stdin, prompt is accepted and bounded to PROMPT_MAX_CHARS.
+    const start = worker.posted[0]
+    if (start?.kind !== 'start' || start.stdin === undefined) {
+      throw new Error('expected start message with stdin buffer')
+    }
+    const views = stdinViews(start.stdin)
+    beginStdinWait(views)
+    worker.emit({ kind: 'stdin', id: worker.lastRunId, prompt: 'a'.repeat(PROMPT_MAX_CHARS + 50) })
+    expect(runner.phase).toBe('input')
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toHaveLength(PROMPT_MAX_CHARS)
+  })
+
+  it('enforces a main-thread output cap even if the worker bypasses its own limiter', () => {
+    const { runner, latest, output } = harness()
+    runner.run(PARAMS)
+    const worker = latest()
+    worker.ready()
+
+    const chunk = 'x'.repeat(200_000)
+    for (let i = 0; i < 10; i += 1) {
+      worker.emit({ kind: 'output', id: worker.lastRunId, stream: 'out', text: chunk })
+    }
+
+    const total = output.join('')
+    expect(total).toContain('--- output truncated ---')
+    expect(total.length).toBeLessThanOrEqual(OUTPUT_MAX_CHARS + 64)
+  })
+
+  it('validates worker requests and rejects unsafe indexUrl values', () => {
+    expect(parseWorkerRequest({ kind: 'start', indexUrl: '/pyodide/314.0.8/' })).not.toBeNull()
+    expect(parseWorkerRequest({ kind: 'start', indexUrl: 'https://evil.example/' })).toBeNull()
+    expect(parseWorkerRequest({ kind: 'start', indexUrl: '/pyodide/../etc/' })).toBeNull()
+    expect(parseWorkerRequest({ kind: 'unknown' })).toBeNull()
+    expect(parseWorkerEvent({ kind: 'ready', info: { pyodide: '1', python: '3' } })).not.toBeNull()
   })
 })

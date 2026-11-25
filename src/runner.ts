@@ -20,7 +20,14 @@
  * reload happens while the user is reading their traceback.
  */
 
-import type { OutputStream, RunMode, RunStatus, RuntimeInfo, WorkerEvent } from './protocol.ts'
+import { createOutputLimiter, PROMPT_MAX_CHARS, TRUNCATED_NOTICE } from './output.ts'
+import {
+  type OutputStream,
+  parseWorkerEvent,
+  type RunMode,
+  type RunStatus,
+  type RuntimeInfo,
+} from './protocol.ts'
 import {
   isAwaitingStdin,
   sendStdinEof,
@@ -101,12 +108,15 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   const isolated = isCrossOriginIsolated()
 
   let worker: Worker | null = null
+  let replyPort: MessagePort | null = null
   let phase: RunnerPhase = 'cold'
 
   /** The run waiting for the interpreter to finish loading, if any. */
   let queued: RunParams | null = null
   let runId = 0
   let stopTimer: number | undefined
+  /** Main-thread output cap: defense-in-depth if worker output limiter is bypassed. */
+  const outputLimiter = createOutputLimiter()
 
   let interrupt: Uint8Array<SharedArrayBuffer> | null = null
   let interruptBuffer: SharedArrayBuffer | null = null
@@ -145,26 +155,41 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   }
 
   function spawn(): Worker {
+    const isRealWorker = options.createWorker === undefined
     const created =
       options.createWorker?.() ??
       new Worker(new URL('./pyodide.worker.ts', import.meta.url), { type: 'module' })
 
-    created.addEventListener('message', (event: MessageEvent<WorkerEvent>) => {
-      handle(created, event.data)
-    })
+    const startPayload = {
+      kind: 'start' as const,
+      indexUrl: options.indexUrl,
+      ...(interruptBuffer === null ? {} : { interrupt: interruptBuffer }),
+      ...(stdinBuffer === null ? {} : { stdin: stdinBuffer }),
+    }
 
     created.addEventListener('error', (event: ErrorEvent) => {
       if (created !== worker) return
+      clearStopTimer()
+      clearInterrupt()
       setPhase('failed')
       options.onError(event.message === '' ? 'The Python worker failed to start.' : event.message)
     })
 
-    created.postMessage({
-      kind: 'start',
-      indexUrl: options.indexUrl,
-      ...(interruptBuffer === null ? {} : { interrupt: interruptBuffer }),
-      ...(stdinBuffer === null ? {} : { stdin: stdinBuffer }),
-    })
+    if (isRealWorker && typeof MessageChannel === 'function') {
+      const channel = new MessageChannel()
+      replyPort = channel.port1
+      channel.port1.addEventListener('message', (event: MessageEvent<unknown>) => {
+        handle(created, event.data)
+      })
+      channel.port1.start()
+      created.postMessage({ ...startPayload, port: channel.port2 }, [channel.port2])
+    } else {
+      replyPort = null
+      created.addEventListener('message', (event: MessageEvent<unknown>) => {
+        handle(created, event.data)
+      })
+      created.postMessage(startPayload)
+    }
 
     return created
   }
@@ -178,6 +203,7 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   function dispatch(params: RunParams): void {
     if (worker === null) return
     runId += 1
+    outputLimiter.reset()
     clearInterrupt()
     setPhase('running')
     worker.postMessage({
@@ -190,13 +216,17 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     })
   }
 
-  function handle(from: Worker, event: WorkerEvent): void {
+  function handle(from: Worker, raw: unknown): void {
     // A terminated worker's last messages are already in the queue; they are
     // about a run the user has abandoned, so they are dropped.
     if (from !== worker) return
 
+    const event = parseWorkerEvent(raw)
+    if (event === null) return
+
     switch (event.kind) {
       case 'ready':
+        if (phase !== 'loading') return
         options.onReady(event.info)
         setPhase('ready')
         if (queued !== null) {
@@ -207,23 +237,37 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
         return
 
       case 'failed':
+        if (phase !== 'loading' && phase !== 'running' && phase !== 'input') return
+        clearStopTimer()
+        clearInterrupt()
         setPhase('failed')
         options.onError(event.message)
         return
 
-      case 'output':
-        if (event.id !== runId) return
-        options.onOutput(event.stream, event.text)
+      case 'output': {
+        if ((phase !== 'running' && phase !== 'input') || event.id !== runId) return
+        const wasTruncated = outputLimiter.truncated
+        const kept = outputLimiter.accept(event.text)
+        if (kept !== '') options.onOutput(event.stream, kept)
+        if (!wasTruncated && outputLimiter.truncated && event.text !== TRUNCATED_NOTICE) {
+          options.onOutput('err', TRUNCATED_NOTICE)
+        }
         return
+      }
 
       case 'stdin':
-        if (event.id !== runId) return
+        if (phase !== 'running' || event.id !== runId) return
+        if (stdin === null || !isAwaitingStdin(stdin)) return
         setPhase('input')
-        options.onStdinPrompt(event.prompt)
+        options.onStdinPrompt(
+          event.prompt.length > PROMPT_MAX_CHARS
+            ? event.prompt.slice(event.prompt.length - PROMPT_MAX_CHARS)
+            : event.prompt,
+        )
         return
 
       case 'done':
-        if (event.id !== runId) return
+        if ((phase !== 'running' && phase !== 'input') || event.id !== runId) return
         clearStopTimer()
         // A Stop that arrived as the run was already finishing.
         clearInterrupt()
@@ -236,6 +280,8 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   /** Terminate and immediately start a replacement, so the reload overlaps. */
   function hardRestart(): void {
     clearStopTimer()
+    replyPort?.close()
+    replyPort = null
     worker?.terminate()
     worker = null
     // Before the replacement exists: it is handed this same buffer.
