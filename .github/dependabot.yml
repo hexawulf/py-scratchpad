@@ -1,4 +1,5 @@
-# Dependabot version updates (security updates are enabled in repo settings).
+# Dependabot version updates.
+# Ensure Dependabot alerts and security updates are enabled in Repository Settings -> Code security.
 # Weekly, grouped so routine updates open a single PR per ecosystem.
 version: 2
 updates:
