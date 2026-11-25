@@ -27,7 +27,7 @@ Source, issues and docs: **[github.com/hexawulf/py-scratchpad](https://github.co
 
 ```sh
 docker run -d --name py-scratchpad --restart unless-stopped \
-  -p 8080:80 0xwulf/py-scratchpad:0.3.10
+  -p 8080:80 0xwulf/py-scratchpad:0.3.12
 ```
 
 Then open `http://<host>:8080/`. That is the whole setup: no data directory to
@@ -40,7 +40,7 @@ writable paths:
 docker run -d --name py-scratchpad --restart unless-stopped \
   -p 8080:80 --read-only \
   --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
-  0xwulf/py-scratchpad:0.3.10
+  0xwulf/py-scratchpad:0.3.12
 ```
 
 ## Docker Compose
@@ -48,7 +48,7 @@ docker run -d --name py-scratchpad --restart unless-stopped \
 ```yaml
 services:
   py-scratchpad:
-    image: 0xwulf/py-scratchpad:0.3.10 # pin a release; :latest also exists
+    image: 0xwulf/py-scratchpad:0.3.12 # pin a release; :latest also exists
     container_name: py-scratchpad
     restart: unless-stopped
     ports:
@@ -85,7 +85,7 @@ docker compose up -d
 
 | Tag      | Meaning                                         |
 | -------- | ----------------------------------------------- |
-| `X.Y.Z`  | one exact release, e.g. `0.3.10`                |
+| `X.Y.Z`  | one exact release, e.g. `0.3.12`                |
 | `X.Y`    | the newest patch release of that minor line     |
 | `latest` | the newest release (pre-releases never move it) |
 
@@ -203,6 +203,16 @@ conflicting headers.
 
 ## Changelog
 
+- **0.3.12** — security hardening from a full audit (no critical or high findings). Strict checks
+  on every page↔worker message and a private reply channel; output and `input()` prompts capped
+  on both sides; stricter filename handling and a 2 MiB limit on opened files; nginx answers only
+  GET/HEAD and never serves dotfiles; tighter CSP plus `X-Frame-Options`, `Permissions-Policy` and
+  `Cross-Origin-Resource-Policy`. Base images pinned by digest; run it with
+  `--cap-drop=ALL --cap-add=CHOWN --cap-add=NET_BIND_SERVICE --cap-add=SETGID --cap-add=SETUID
+  --security-opt=no-new-privileges:true` (see the compose example). Both architectures are now
+  Trivy-scanned before publishing.
+- **0.3.11** — internal cleanup of the settings reload path; README screenshots and preview image
+  refreshed. No behavior change.
 - **0.3.10** — interface polish and cleanup, no runtime change. Run is now the one filled button;
   dark-theme tracebacks use a clearly red tone; the accent palette and favicon are 0xWulf teal; the
   About dialog's Runtime row matches the others. Unused worker messages removed; docs refreshed.
