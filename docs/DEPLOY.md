@@ -27,9 +27,9 @@ Hub. $APP_HOST **pulls a pinned tag** and never builds; it holds one file.
 | Image | `0xwulf/py-scratchpad:X.Y.Z` — pinned, so watchtower is opted out |
 | LAN endpoint | `http://$APP_HOST_IP:5040/` |
 | Public URL | `https://py-scratchpad.com` (+ `www`, which 301s to the apex) |
-| Also served at | `https://python.piapps.dev` — the original host, unchanged, no redirect |
+| Former host | `https://python.piapps.dev` — retired 2026-11-25 (vhost, DNS record and its Cloudflare cache rule removed) |
 
-Both public hostnames are $EDGE_HOST nginx vhosts proxying the same container. See §6.
+The public hostname is a $EDGE_HOST nginx vhost proxying the container. See §6.
 
 **Placeholders.** This repo is public, so host names and addresses are written
 as shell variables: `$APP_HOST` (ssh alias of the host that runs the
@@ -259,11 +259,10 @@ purging, and the old path simply stops being requested.
 public vhost too, since $EDGE_HOST nginx must pass the container's headers through
 without adding its own:
 
-Both public hostnames, since each is a separate vhost:
+The public hostname:
 
 ```
 curl -sI https://py-scratchpad.com/
-curl -sI https://python.piapps.dev/
 ```
 
 **2.6b COOP/COEP must arrive exactly once, and isolation must actually be on.**
@@ -272,7 +271,7 @@ presence in the headers is not proof that the browser agreed — so count them,
 then ask a browser:
 
 ```
-for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do H=$(curl -sI "$u") ; printf '%s\n' "$u" ; for h in cross-origin-opener-policy cross-origin-embedder-policy ; do printf '  %-32s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done ; done
+for u in https://py-scratchpad.com/ ; do H=$(curl -sI "$u") ; printf '%s\n' "$u" ; for h in cross-origin-opener-policy cross-origin-embedder-policy ; do printf '  %-32s %s\n' "$h" "$(printf '%s\n' "$H" | grep -c -i "^$h:")" ; done ; done
 ```
 
 Both counts must be `1` on both hostnames.
@@ -284,7 +283,7 @@ $APP_HOST (Chromium comes from `npx playwright install chromium`):
 
 ```
 cd ~/bots/py-scratchpad
-node --input-type=module -e 'import {chromium} from "playwright"; const b = await chromium.launch(); const p = await b.newPage(); for (const u of ["https://py-scratchpad.com/", "https://python.piapps.dev/"]) { await p.goto(u); console.log(u, "crossOriginIsolated =", await p.evaluate(() => window.crossOriginIsolated)); } await b.close()'
+node --input-type=module -e 'import {chromium} from "playwright"; const b = await chromium.launch(); const p = await b.newPage(); for (const u of ["https://py-scratchpad.com/"]) { await p.goto(u); console.log(u, "crossOriginIsolated =", await p.evaluate(() => window.crossOriginIsolated)); } await b.close()'
 ```
 
 Both must print `crossOriginIsolated = true`. That is the only thing that
@@ -374,26 +373,28 @@ confirmation and is never part of a rollback.
 **Production nginx on $EDGE_HOST is an operator approval gate** — read this section, then propose,
 then wait for approval before touching it.
 
-Two vhosts proxy the same container. Neither redirects to the other, and that is deliberate:
-`localStorage` is scoped per origin, so code saved at one hostname is invisible at the other.
-Redirecting the old host would silently hide a user's files.
+One vhost proxies the container: `py-scratchpad.com`. The original host `python.piapps.dev` was
+**retired on 2026-11-25** (vhost, Cloudflare DNS record and its `/pyodide/` cache rule removed;
+vhost backup on $EDGE_HOST in `~/backups/python.piapps.dev.nginx.bak_20261125_211937`). Code a
+user saved in that origin's `localStorage` stays in their browser but is no longer reachable;
+bringing the host back (restore the vhost + a proxied A record) would make it reachable again.
 
-| | `py-scratchpad.com` | `python.piapps.dev` |
-|---|---|---|
-| Role | public home since 2026-10-09 | original host, still serving |
-| Vhost file | `/etc/nginx/sites-available/py-scratchpad.com` | `/etc/nginx/sites-available/python.piapps.dev` |
-| In repo | `docs/nginx/py-scratchpad.com` | not under version control |
-| Names | apex + `www` (`www` 301s to apex) | single name |
-| Backend | `proxy_pass http://$APP_HOST_IP:5040` | same |
-| TLS | **dedicated** `py-scratchpad.com`, ECDSA P-256, SAN apex + `www`, expires 2027-01-07 | **shared wildcard** `piapps.dev-0001` |
-| ACME | HTTP-01, `authenticator = webroot`, `/var/www/letsencrypt` | DNS-01, `authenticator = dns-cloudflare` |
-| Cloudflare | zone `py-scratchpad.com`, apex + `www` A → `$ORIGIN_WAN_IP`, Proxied, SSL Full (strict) | zone `piapps.dev`, same IP, Proxied, Full (strict) |
-| Monitor | Uptime Kuma keyword monitor (`py-scratchpad`) | unmonitored since the move |
+| | `py-scratchpad.com` |
+|---|---|
+| Role | public home since 2026-10-09; only host since 2026-11-25 |
+| Vhost file | `/etc/nginx/sites-available/py-scratchpad.com` |
+| In repo | `docs/nginx/py-scratchpad.com` |
+| Names | apex + `www` (`www` 301s to apex) |
+| Backend | `proxy_pass http://$APP_HOST_IP:5040` |
+| TLS | **dedicated** `py-scratchpad.com`, ECDSA P-256, SAN apex + `www`, expires 2027-01-07 |
+| ACME | HTTP-01, `authenticator = webroot`, `/var/www/letsencrypt` |
+| Cloudflare | zone `py-scratchpad.com`, apex + `www` A → `$ORIGIN_WAN_IP`, Proxied, SSL Full (strict) |
+| Monitor | Uptime Kuma keyword monitor (`py-scratchpad`); taipei-watch piapps2 ingress probe |
 
 `py-scratchpad.com` uses a dedicated server block for the `www` → apex redirect
 rather than an `if ($host = ...)` rewrite.
 
-**No `add_header` belongs in either vhost.** The container owns the security headers
+**No `add_header` belongs in this vhost.** The container owns the security headers
 (`docker/security-headers.conf`) and nothing on $EDGE_HOST adds headers at http level, in `conf.d/`
 or in `snippets/`. An `add_header` here would make each one appear **twice** on the public URL
 — and for `Cross-Origin-Embedder-Policy` (new in 0.3.0) a duplicate does not merely look
@@ -402,12 +403,9 @@ untidy: the browser refuses to isolate the document, and `SharedArrayBuffer` dis
 
 ### 6.1 The two certificates are not interchangeable
 
-**`python.piapps.dev` needs no certificate work, ever.** `piapps.dev-0001` is a wildcard (SAN
-`piapps.dev` + `*.piapps.dev`), so the hostname is already covered and needs no renewal config
-of its own. It renews via DNS-01 (`authenticator = dns-cloudflare`, using the edge host's
-root-owned Cloudflare API credentials) with `renew_hook = systemctl reload nginx`.
-**Never delete it while rolling back a single vhost:**
-it serves `piapps.dev` and every subdomain.
+**Never delete the shared wildcard `piapps.dev-0001`** (SAN `piapps.dev` + `*.piapps.dev`, DNS-01)
+while rolling back this vhost: it served the retired `python.piapps.dev` and still serves `piapps.dev`
+and every subdomain.
 
 **`py-scratchpad.com` has its own cert**, issued HTTP-01 via webroot — *not* the DNS-01
 wildcard path. It never touches the Cloudflare credentials file.
@@ -476,7 +474,7 @@ ssh "$EDGE_HOST" 'sudo ln -s /etc/nginx/sites-available/py-scratchpad.com /etc/n
 `reload`, never `restart` — a restart drops every other site on $EDGE_HOST with it.
 
 **Always regression-check the other vhosts on `$EDGE_HOST` afterwards.** They share the process —
-confirm `https://py-scratchpad.com/`, `https://python.piapps.dev/`, and any sibling vhosts listed
+confirm `https://py-scratchpad.com/` and any sibling vhosts listed
 in your local deploy notes still answer as expected.
 
 ### 6.3 Rollback
@@ -492,7 +490,7 @@ The hostname then returns Cloudflare **525** — the `443 default_server` has
 `ssl_reject_handshake on`, so an SNI no vhost claims is refused at the handshake. That is the
 expected post-rollback state, not a fault. (On port 80 it becomes **520**: the
 `listen 80 default_server` block answers `return 444`, a reset, which the edge reports as 520.)
-Rolling back this vhost leaves `python.piapps.dev` serving, which is the point of keeping it.
+Since `python.piapps.dev` was retired (2026-11-25), a rollback takes the app offline publicly.
 
 **Do not delete either certificate as part of a rollback.**
 
@@ -546,19 +544,19 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   ```
   UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36'
   AC='text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-  for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | grep -c cloudflareinsights ; done
+  for u in https://py-scratchpad.com/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | grep -c cloudflareinsights ; done
   ```
   Both must print `0`. A `1` with `no-transform` present on the response means the edge is
   ignoring the directive — report that and stop; do not reach for the CSP.
 
   Then hash the **browser-shaped** response against the origin, not the bare one:
   ```
-  for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | sha256sum ; done
+  for u in https://py-scratchpad.com/ ; do printf '%-30s ' "$u" ; curl -s -H "User-Agent: $UA" -H "Accept: $AC" "$u" | sha256sum ; done
   ssh "$EDGE_HOST" "curl -s http://$APP_HOST_IP:5040/ | sha256sum"
   ```
   All three hashes must match. And confirm the directive actually arrives:
   ```
-  for u in https://py-scratchpad.com/ https://python.piapps.dev/ ; do printf '%-30s ' "$u" ; curl -sI "$u" | grep -i '^cache-control:' ; done
+  for u in https://py-scratchpad.com/ ; do printf '%-30s ' "$u" ; curl -sI "$u" | grep -i '^cache-control:' ; done
   ```
   Both must read `no-cache, no-transform`.
 - `curl -sI http://py-scratchpad.com` returns 301 from the **Cloudflare edge** once

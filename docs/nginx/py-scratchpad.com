@@ -5,10 +5,8 @@
 # (docs/DEPLOY.md §6.2). Installed as-is, nginx -t rejects it as an unknown variable.
 # Created: 2026-10-09
 #
-# Backend and proxy block copied from python.piapps.dev, which keeps serving
-# unchanged on the shared piapps.dev-0001 wildcard. There is no redirect from
-# the old host: browser localStorage is per origin, so code saved at
-# python.piapps.dev would be unreachable after a redirect.
+# Backend and proxy block were copied from python.piapps.dev, the original
+# host, which was retired on 2026-11-25. This is now the only public vhost.
 #
 # The www -> apex redirect uses a separate server block rather than `if ($host = ...)`.
 #

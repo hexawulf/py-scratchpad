@@ -89,10 +89,8 @@ lives in your browser's `localStorage` under the key `py-scratchpad:v1` and nowh
 
 ### The old hostname
 
-The site is also still served at <https://python.piapps.dev>, its original home. Both
-hostnames reach the same container and neither redirects to the other, on purpose:
-`localStorage` is per origin, so anything saved at `python.piapps.dev` is only reachable there.
-Download it and re-open it at the new address.
+The original home, `python.piapps.dev`, was retired on 2026-11-25. `localStorage` is per origin, so
+code saved there is no longer reachable from this site.
 
 ## Run it yourself
 
