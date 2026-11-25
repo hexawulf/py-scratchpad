@@ -10,20 +10,17 @@
 # the old host: browser localStorage is per origin, so code saved at
 # python.piapps.dev would be unreachable after a redirect.
 #
-# The www -> apex redirect uses a separate server block, as doubletrees.app
-# does, rather than the `if ($host = ...)` that linuxsvr.org uses.
+# The www -> apex redirect uses a separate server block rather than `if ($host = ...)`.
 #
 # TLS: dedicated cert py-scratchpad.com (SAN apex + www), ECDSA P-256,
-# issued HTTP-01 via webroot /var/www/letsencrypt — the method the other
-# per-domain certs on this host use (containeryard.org, snippetmate.com,
-# linuxsvr.org). NOT the DNS-01 wildcard path that piapps.dev-0001 uses.
+# issued HTTP-01 via webroot /var/www/letsencrypt (not the DNS-01 wildcard
+# path used by piapps.dev).
 #
 # Every block includes the ACME snippet, and every redirect lives in a
 # `location /` rather than at server level. That is deliberate: nginx runs a
 # server-level `return 301` in the server-rewrite phase, before location
 # selection, which makes `location ^~ /.well-known/acme-challenge/`
-# unreachable. containeryard.org gets this right; doubletrees.app,
-# snippetmate.com and linuxsvr.org put the return at server level.
+# unreachable.
 # In the apex block the snippet's `^~` prefix outranks both the proxy
 # `location /` and the dotfile regex, so challenges are served from the
 # webroot while everything else proxies.
@@ -85,14 +82,16 @@ server {
     access_log /var/log/nginx/py-scratchpad.com.access.log;
     error_log  /var/log/nginx/py-scratchpad.com.error.log;
 
-    client_max_body_size 2m;
+    client_max_body_size 1k;
 
-    location ~* (?i)(^|/)(\.env|\.git|\.htaccess|\.DS_Store|\.aws|credentials|composer\.json)($|/) {
-        deny all;
+    location ~ /\.(?!well-known(?:/|$)) {
         return 404;
     }
 
     location / {
+        limit_except GET HEAD {
+            deny all;
+        }
         proxy_pass http://$APP_HOST_IP:5040;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -100,8 +99,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering off;
+        proxy_buffering on;
         proxy_cache off;
-        proxy_read_timeout 3600s;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
     }
 }

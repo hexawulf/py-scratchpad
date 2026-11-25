@@ -333,8 +333,8 @@ ssh "$APP_HOST" 'docker compose -f ~/bots/py-scratchpad/docker-compose.yml down'
 ```
 
 **4.2 Pin the previous version.** Back up
-`~/bots/py-scratchpad/docker-compose.yml`, edit its tag back to the last
-good `X.Y.Z` (§2.1) with nano, then `pull` and `up -d`. There is one copy of the
+`~/bots/py-scratchpad/docker-compose.yml` to `~/backups/` (outside the repo),
+edit its tag back to the last good `X.Y.Z` (§2.1) with nano, then `pull` and `up -d`. There is one copy of the
 file, so this leaves the clone dirty until a commit reverts the tag on `main`. Published tags are immutable, so
 the earlier image is still there. This is the normal rollback.
 
@@ -388,12 +388,10 @@ Redirecting the old host would silently hide a user's files.
 | TLS | **dedicated** `py-scratchpad.com`, ECDSA P-256, SAN apex + `www`, expires 2027-01-07 | **shared wildcard** `piapps.dev-0001` |
 | ACME | HTTP-01, `authenticator = webroot`, `/var/www/letsencrypt` | DNS-01, `authenticator = dns-cloudflare` |
 | Cloudflare | zone `py-scratchpad.com`, apex + `www` A → `$ORIGIN_WAN_IP`, Proxied, SSL Full (strict) | zone `piapps.dev`, same IP, Proxied, Full (strict) |
-| Monitor | Uptime Kuma id 60, `py-scratchpad`, keyword `py-scratchpad` | unmonitored since the move |
+| Monitor | Uptime Kuma keyword monitor (`py-scratchpad`) | unmonitored since the move |
 
-Reference each was copied from: `python.piapps.dev` came from `stocky.piapps.dev`;
-`py-scratchpad.com` came from `python.piapps.dev`, with the `www` → apex redirect
-structured as in `doubletrees.app` (a separate server block, not the `if ($host = ...)`
-that `linuxsvr.org` uses).
+`py-scratchpad.com` uses a dedicated server block for the `www` → apex redirect
+rather than an `if ($host = ...)` rewrite.
 
 **No `add_header` belongs in either vhost.** The container owns the security headers
 (`docker/security-headers.conf`) and nothing on $EDGE_HOST adds headers at http level, in `conf.d/`
@@ -405,19 +403,18 @@ untidy: the browser refuses to isolate the document, and `SharedArrayBuffer` dis
 ### 6.1 The two certificates are not interchangeable
 
 **`python.piapps.dev` needs no certificate work, ever.** `piapps.dev-0001` is a wildcard (SAN
-`piapps.dev` + `*.piapps.dev`), so the hostname is already covered — exactly as `stocky` and
-`kuma` are, and none of the three has a renewal config of its own. It renews via DNS-01
-(`authenticator = dns-cloudflare`, credentials `/root/.secrets/certbot/cloudflare.ini`) with
-`renew_hook = systemctl reload nginx`. **Never delete it while rolling back a single vhost:**
+`piapps.dev` + `*.piapps.dev`), so the hostname is already covered and needs no renewal config
+of its own. It renews via DNS-01 (`authenticator = dns-cloudflare`, using the edge host's
+root-owned Cloudflare API credentials) with `renew_hook = systemctl reload nginx`.
+**Never delete it while rolling back a single vhost:**
 it serves `piapps.dev` and every subdomain.
 
-**`py-scratchpad.com` has its own cert**, issued HTTP-01 — the method the other per-domain certs
-on this host use (`containeryard.org`, `snippetmate.com`, `linuxsvr.org`), *not* the DNS-01
+**`py-scratchpad.com` has its own cert**, issued HTTP-01 via webroot — *not* the DNS-01
 wildcard path. It never touches the Cloudflare credentials file.
 
 ```
 [renewalparams]
-account = 5258ecd1b3bd1d52743ad5e19cb7295f
+account = <acme-account-id>
 key_type = ecdsa
 renew_hook = systemctl reload nginx
 authenticator = webroot
@@ -447,37 +444,27 @@ ssh "$EDGE_HOST" 'sudo certbot renew --dry-run --cert-name py-scratchpad.com'
 **Every redirect in this vhost lives in a `location /`, never at server level.** That is not a
 style choice. nginx runs a server-level `return 301` in the **server-rewrite phase, before
 location selection**, which makes `location ^~ /.well-known/acme-challenge/` unreachable in that
-block. Measured on $EDGE_HOST, asking for the file that exists:
-
-```
-containeryard.org   /.well-known/acme-challenge/health -> 200   (redirect in `location /`)
-doubletrees.app     /.well-known/acme-challenge/health -> 301   (server-level return)
-snippetmate.com     /.well-known/acme-challenge/health -> 301   (server-level return)
-linuxsvr.org        /.well-known/acme-challenge/health -> 301   (server-level return)
-```
-
-Those three still renew, because Let's Encrypt **follows redirects** and their 443 blocks (or,
-for `doubletrees.app`, the `nginx` authenticator) serve the token instead — both dry-runs
-succeeded on 2026-10-09. So the server-level form is survivable, not fatal. This vhost simply
-does not depend on the rescue: the ACME snippet is included in all three blocks and every
-redirect is inside a `location`, so the challenge is served directly on port 80 **and** on 443
-after Cloudflare's `always_use_https` starts answering port 80 at the edge.
+block. Keeping the ACME snippet in all three blocks and every redirect inside a `location`
+ensures the challenge is served directly on port 80 **and** on 443 after Cloudflare's
+`always_use_https` starts answering port 80 at the edge.
 
 ### 6.2 Changing a vhost
 
-Never edit in place. Write the file locally, copy it, install it, then test and reload.
+Never edit in place. Write the file locally, stage it in a private `0700` directory on `$EDGE_HOST`,
+install it, then test and reload.
 For `py-scratchpad.com` the local source is in this repo. It is a template: `envsubst` fills in
 `$APP_HOST_IP` (load `docs/deploy.local.env` first), and the `grep` shows the rendered backend
 before anything is installed:
 
 ```
-envsubst '$APP_HOST_IP' < ~/bots/py-scratchpad/docs/nginx/py-scratchpad.com | ssh "$EDGE_HOST" 'cat > /tmp/py-scratchpad.com'
-ssh "$EDGE_HOST" 'grep -n proxy_pass /tmp/py-scratchpad.com'
+STAGE=$(ssh "$EDGE_HOST" 'mkdir -p -m 700 ~/tmp ; mktemp ~/tmp/py-scratchpad.com.XXXXXX')
+envsubst '$APP_HOST_IP' < ~/bots/py-scratchpad/docs/nginx/py-scratchpad.com | ssh "$EDGE_HOST" "cat > '$STAGE'"
+ssh "$EDGE_HOST" "grep -n proxy_pass '$STAGE'"
 ssh "$EDGE_HOST" 'sudo nginx -T > ~/backups/edge-nginx-T.bak_$(date +%Y%m%d_%H%M%S)'
-ssh "$EDGE_HOST" 'sudo install -m 644 -o root -g root /tmp/py-scratchpad.com /etc/nginx/sites-available/py-scratchpad.com'
+ssh "$EDGE_HOST" "sudo install -m 644 -o root -g root '$STAGE' /etc/nginx/sites-available/py-scratchpad.com"
 ssh "$EDGE_HOST" 'sudo nginx -t'
 ssh "$EDGE_HOST" 'sudo systemctl reload nginx'
-ssh "$EDGE_HOST" 'sudo journalctl -u nginx --since "5 min ago" --no-pager ; rm -f /tmp/py-scratchpad.com'
+ssh "$EDGE_HOST" "sudo journalctl -u nginx --since '5 min ago' --no-pager ; rm -f '$STAGE'"
 ```
 
 On a first install, add the symlink between `install` and `nginx -t`:
@@ -488,13 +475,9 @@ ssh "$EDGE_HOST" 'sudo ln -s /etc/nginx/sites-available/py-scratchpad.com /etc/n
 
 `reload`, never `restart` — a restart drops every other site on $EDGE_HOST with it.
 
-**Always regression-check the other vhosts afterwards.** They share the process:
-
-```
-for u in https://stocky.piapps.dev https://kuma.piapps.dev https://piapps.dev https://python.piapps.dev ; do printf '%-34s ' "$u" ; curl -s -o /dev/null -w '%{http_code}\n' "$u" ; done
-```
-
-Expected, unchanged: `stocky 200`, `kuma 302`, `piapps.dev 200`, `python.piapps.dev 200`.
+**Always regression-check the other vhosts on `$EDGE_HOST` afterwards.** They share the process —
+confirm `https://py-scratchpad.com/`, `https://python.piapps.dev/`, and any sibling vhosts listed
+in your local deploy notes still answer as expected.
 
 ### 6.3 Rollback
 
@@ -602,9 +585,9 @@ curl -s -o /dev/null -w '%{http_code}\n' https://py-scratchpad.com/does-not-exis
   deploy directory: `~/bots/py-scratchpad/docker-compose.yml` is the
   file production runs from, so `git pull` there is what moves the pinned tag
   (§2.1). Never run `docker-compose.dev.yml` in it (§3).
-- **Base images are pinned exactly** in the `Dockerfile` as build args
-  (`NODE_VERSION=22.23.3`, `ALPINE_VERSION=3.24`, `NGINX_VERSION=1.30.7`).
-  Bumping them is a deliberate commit, not something a rebuild does on its own.
+- **Base images are pinned by exact tag and digest** in the `Dockerfile`
+  (`node:22.23.5-alpine3.24` and `nginx:1.30.8-alpine3.24-slim`), so Dependabot
+  can open update PRs automatically and tags cannot silently drift.
   `package.json`'s `engines.node` keeps CI on the same Node major as the image.
 - **The build date comes from the source, not the clock.** `vite.config.ts`
   reads `SOURCE_DATE_EPOCH` first, then `git log -1 --format=%cI`. The image has

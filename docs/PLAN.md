@@ -236,35 +236,31 @@ py-scratchpad/
 `docs/DEPLOY.md` §6. What follows is the plan as executed, with the two corrections
 this step turned up.
 
-The reference is **`stocky.piapps.dev`**, not Kuma — stocky is the exact precedent, a $APP_HOST
-container behind a $EDGE_HOST vhost. Kuma is a secondary reference and its WebSocket
-(`Upgrade`/`Connection "upgrade"`) and ACME-challenge blocks must **not** be copied.
+The reference pattern is a standard static-container vhost on `$EDGE_HOST` proxying an `$APP_HOST`
+container — no WebSocket (`Upgrade`/`Connection "upgrade"`) headers are needed.
 
 - `/etc/nginx/sites-available/python.piapps.dev`: port 80 → 301; 443 with `http2 on`, the dotfile deny
   block, and `proxy_pass http://$APP_HOST_IP:5040;`. No WebSocket headers, no `add_header`.
-- **Correction 1 — the certificate.** This plan said to use a Cloudflare origin cert at
-  `/etc/ssl/cloudflare/piapps.dev.crt`. **That file does not exist and $EDGE_HOST does not work that way.**
+- **Correction 1 — the certificate.** This plan originally assumed a Cloudflare origin cert.
   $EDGE_HOST uses **Let's Encrypt**, and `*.piapps.dev` is served by one **shared wildcard**: cert name
   `piapps.dev-0001`, SAN `piapps.dev` + `*.piapps.dev`, at
   `/etc/letsencrypt/live/piapps.dev-0001/fullchain.pem` / `privkey.pem`. `python.piapps.dev` was
-  **already covered**, exactly as `stocky` and `kuma` are, so **no certificate was issued and no
-  renewal config was touched.** Renewal is automatic (`renew_hook = systemctl reload nginx`); the
-  wildcard was issued via DNS-01 (`authenticator = dns-cloudflare`), which is the only option for a
-  wildcard — so the "does HTTP-01 work behind the orange cloud" question never arises.
+  **already covered**, so **no certificate was issued and no renewal config was touched.** Renewal is
+  automatic (`renew_hook = systemctl reload nginx`); the wildcard was issued via DNS-01
+  (`authenticator = dns-cloudflare`).
   A rollback must **never** delete this cert: it serves piapps.dev and every subdomain.
 - **Correction 2 — the real-IP include.** `cloudflare_real_ip.conf` is **already loaded at http level**
-  via `include /etc/nginx/conf.d/*.conf;` in `nginx.conf`. stocky does not include it by name, and
-  neither does this vhost. Do not add it.
+  via `include /etc/nginx/conf.d/*.conf;` in `nginx.conf`. Do not include it per vhost.
 - The proxy **passes the container's headers through** (CSP, nosniff, Referrer-Policy, Cache-Control).
   Nothing on $EDGE_HOST adds headers at http level, in `conf.d/` or in `snippets/` (grepped), so there is
   no duplication — verified with a per-header occurrence count on the public URL, not just presence.
-- Steps as executed: write locally → `scp` to `$EDGE_HOST:/tmp` → `sudo install -m 644` into
+- Steps as executed: write locally → stage in a private `0700` directory on `$EDGE_HOST` → `sudo install -m 644` into
   `sites-available` → `sudo ln -s` into `sites-enabled` → `sudo nginx -t` →
   `sudo systemctl reload nginx` (reload, not restart) → `journalctl -u nginx --since "5 min ago"`.
-- **Cloudflare DNS: no change was needed.** The `python` A record already existed and already matched
-  `stocky`/`kuma` byte for byte — `$ORIGIN_WAN_IP`, Proxied (orange), TTL auto — and the zone SSL mode
-  is already Full (strict). Before the vhost existed the hostname returned **525**, because the `443
-  default_server` has `ssl_reject_handshake on` and no vhost claimed that SNI.
+- **Cloudflare DNS: no change was needed.** The `python` A record already existed — `$ORIGIN_WAN_IP`,
+  Proxied (orange), TTL auto — and the zone SSL mode is already Full (strict). Before the vhost existed
+  the hostname returned **525**, because the `443 default_server` has `ssl_reject_handshake on` and no
+  vhost claimed that SNI.
 - **Cloudflare caveat.** The zone has Web Analytics with `auto_install: true`, which *can* inject
   `static.cloudflareinsights.com/beacon.min.js` into proxied HTML — which would break the no-CDN rule
   and trip `script-src 'self'`. It is not injecting (public `index.html` is byte-identical to the
@@ -293,29 +289,22 @@ after a redirect. The operational detail lives in `docs/DEPLOY.md` §6; what fol
 step turned up.
 
 - **Second vhost, not a rename.** `/etc/nginx/sites-available/py-scratchpad.com`, copied from
-  `python.piapps.dev`, with the `www` → apex redirect structured as in `doubletrees.app`
-  (a separate `443` server block) rather than the `if ($host = ...)` of `linuxsvr.org`.
+  `python.piapps.dev`, with the `www` → apex redirect in a separate `443` server block.
   Source of truth is now in the repo at `docs/nginx/py-scratchpad.com` — `python.piapps.dev`
   has no such file.
 - **Correction to §6's certificate story.** That section is right that `python.piapps.dev` needs
   no certificate work, but the new host is **not** on the wildcard. It got its own ECDSA P-256
-  cert, SAN apex + `www`, expiring 2027-01-07, issued by **HTTP-01 `webroot`** — the method
-  `containeryard.org`, `snippetmate.com` and `linuxsvr.org` use. DNS-01 was the first plan and
-  was dropped: the certbot credential in `/root/.secrets/certbot/cloudflare.ini` is a **scoped
-  token with access to `piapps.dev` only** (`GET /zones` returns exactly that one zone), so it
-  cannot answer a DNS challenge for the new domain. Nothing in this step read or wrote that file,
-  which matters because `piapps.dev-0001` renewed from it the next day.
+  cert, SAN apex + `www`, expiring 2027-01-07, issued by **HTTP-01 `webroot`**. DNS-01 was the
+  first plan and was dropped because the edge host's existing DNS-01 token is scoped to `piapps.dev`
+  only and cannot answer challenges for `py-scratchpad.com`. Nothing in this step read or wrote
+  that credential file.
 - **Order is load-bearing.** The cert must exist before any `443` block names it, so the vhost
   went in as **port 80 only** first, the challenge path was proved end to end through Cloudflare,
   then certbot ran, then the `443` blocks were added. Two installs, two reloads.
 - **Every redirect sits in a `location /`, never at server level.** nginx runs a server-level
   `return 301` in the server-rewrite phase, *before* location selection, which makes
-  `location ^~ /.well-known/acme-challenge/` unreachable in that block. Measured on $EDGE_HOST:
-  `containeryard.org` answers `200` for an existing challenge file, while `doubletrees.app`,
-  `snippetmate.com` and `linuxsvr.org` answer `301`. Those three still renew — Let's Encrypt
-  follows redirects and their `443` blocks (or, for `doubletrees.app`, the `nginx` authenticator)
-  serve the token; both dry-runs passed. So it is survivable, not fatal. This vhost does not rely
-  on the rescue: the ACME snippet is in all three blocks.
+  `location ^~ /.well-known/acme-challenge/` unreachable in that block. Keeping the ACME snippet in
+  all three blocks and every redirect inside a `location` serves challenges directly on both 80 and 443.
 - **Cloudflare.** The zone was already active with apex, `www` and a wildcard `*` A record, all
   proxied to `$ORIGIN_WAN_IP` — byte-identical to the `python` record on `piapps.dev` except
   that `www` is an A record rather than a CNAME, which is the same style the reference uses.
@@ -356,19 +345,11 @@ step turned up.
 
 ## 7. Monitoring and docs
 
-- Uptime Kuma: **done 2026-10-09** — monitor id 60, name `py-scratchpad`, type **keyword**,
-  URL `https://python.piapps.dev` (**repointed to `https://py-scratchpad.com` later the same day,
-  see §6.1**), keyword `py-scratchpad` (it is the `<title>`), interval 60 s,
-  retry 60 s, 2 retries, resend 30, accepted `200-299`, notification 1 `SIGINT → hexawulf`, no parent
-  group. Field-for-field a copy of the `pitasker` / `netdata` monitors. First heartbeat:
-  `UP — 200 - OK, keyword is found`. See the operator's Kuma notes.
-  Note: `kuma-push-provision.py` could not be used — it is push-only. The later URL change was
-  made with a one-off script on the same socket.io pattern (`getMonitor` 60 → replace `url` →
-  `editMonitor`), run inside the container and deleted afterwards.
-- Update the operator's cron reference only if a cron gets added (none is planned, none added).
-- **Done 2026-10-09:** the vault note's `status:` is `live`, and the service, port and vhost are in the
-  hexawulf-homelab skill (`references/hosts-detail.md` $APP_HOST container list and
-  `references/network.md` §6 vhost table).
+- Uptime Kuma: **done 2026-10-09** — keyword monitor `py-scratchpad` targeting
+  `https://py-scratchpad.com`, matching keyword `py-scratchpad` (`<title>`), interval 60 s,
+  retry 60 s, 2 retries, accepted `200-299`.
+- Update operator cron notes only if a cron gets added (none is planned, none added).
+- **Done 2026-10-09:** service, port, and vhost recorded in operator deployment inventory.
 
 ---
 
