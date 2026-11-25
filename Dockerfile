@@ -12,7 +12,7 @@
 # --- build: produce dist/ -----------------------------------------------------
 # $BUILDPLATFORM-pinned: dist/ is byte-identical on every arch, so the bundle is
 # built once natively instead of a second time under QEMU emulation.
-FROM --platform=$BUILDPLATFORM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
+FROM --platform=$BUILDPLATFORM node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS build
 # The About dialog's build date comes from the source's own timestamp, never
 # from the build clock (see vite.config.ts). .dockerignore excludes .git, so
 # `git log` cannot be the source here: release.yml passes the tagged commit's
