@@ -222,6 +222,8 @@ jobs:
   publish:
     name: Build and push (amd64, arm64)
     needs: [tag, test, scan]
+    # Docker Hub secrets belong to this environment (deployments: main + v* tags only).
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
