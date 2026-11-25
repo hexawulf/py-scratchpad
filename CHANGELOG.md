@@ -5,6 +5,19 @@ All notable changes to `py-scratchpad` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] - 2026-11-25
+
+### Security
+
+Security swarm audit: 45 verified findings (0 critical, 0 high), 32 fixed (#8). Full report: [docs/security/SECURITY_AUDIT_2026-11-25.md](docs/security/SECURITY_AUDIT_2026-11-25.md).
+
+- Worker protocol: every page↔worker message is validated, worker replies go over a private `MessageChannel`, the main thread caps output too, and the `input()` prompt is capped at 512 characters.
+- Python runner: lives in a private namespace, restores `sys` streams after each run, evicts its `linecache` entry, and strips runtime frames without recursion.
+- Files: stricter filename sanitizing (C1 controls, bidi/invisible characters, Windows-reserved names) and a 2 MiB limit on opened files; fixes to the multi-tab conflict notice and a race between two quick Opens.
+- nginx: GET/HEAD only (others get `405`), dotfiles return `404`, 1 KB body limit; CSP adds `form-action 'none'` and drops `blob:` from `worker-src`; adds `X-Frame-Options`, `Permissions-Policy` and `Cross-Origin-Resource-Policy`. `vite preview` now sends the same headers, so CI e2e catches CSP regressions.
+- Image: base images pinned by digest (node 22.23.5, nginx 1.30.8 alpine-slim), `npm ci --ignore-scripts`, explicit build inputs, wider `.dockerignore`. The container runs with all capabilities dropped except the four nginx needs, `no-new-privileges`, a PID limit and size-capped `noexec` tmpfs mounts.
+- Release: Trivy scans both amd64 and arm64 in a separate job without the Docker socket or Docker Hub secrets, before publishing; CI runs `npm audit --audit-level=high`.
+
 ## [0.3.11] - 2026-11-25
 
 ### Changed
@@ -142,6 +155,7 @@ Tagged, but the release Trivy gate blocked publication on the nginx CVEs fixed i
 - Multi-stage `node`/`nginx` Docker image with strict CSP, security headers, read-only rootfs Docker Compose configuration, and multi-arch (`linux/amd64`, `linux/arm64`) GitHub Actions CI and release workflows with SHA-pinned actions, SBOM, and provenance attestations.
 - MIT license and Docker Hub overview documentation.
 
+[0.3.12]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.11...v0.3.12
 [0.3.11]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.10...v0.3.11
 [0.3.10]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/hexawulf/py-scratchpad/compare/v0.3.8...v0.3.9
