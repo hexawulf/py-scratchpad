@@ -35,6 +35,9 @@ const BOM_CHAR = '\ufeff'
 /** Long enough for any real filename, short of the 255-byte limit on ext4. */
 const MAX_NAME_LENGTH = 120
 
+/** Hard cap on imported files (2 MiB): fits comfortably inside localStorage quota. */
+export const MAX_OPEN_FILE_BYTES = 2 * 1024 * 1024
+
 /** What has to travel with the text to reproduce the original file. */
 export interface FileMeta {
   lineEnding: LineEnding
@@ -52,22 +55,30 @@ export function isLineEnding(value: unknown): value is LineEnding {
   return value === '\n' || value === '\r\n' || value === '\r'
 }
 
+/** Windows reserved device names that cannot be safely saved on NTFS/FAT. */
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
+
 /**
  * Make a user-supplied or file-supplied name safe to put in `<a download>`.
- * Path separators and control characters go; the rest is the user's business,
- * including the extension — a buffer may legitimately be `notes.txt`.
+ * Path separators, control characters, Unicode Bidi/invisible formatters,
+ * Windows-illegal characters, trailing dots/spaces, and reserved device names
+ * are removed or rejected; the rest is the user's business.
  */
 export function sanitizeFilename(raw: string): string {
   const cleaned = raw
-    // eslint-disable-next-line no-control-regex -- stripping control chars is the point
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .replace(/[/\\]/g, '')
+    // eslint-disable-next-line no-control-regex -- stripping C0/C1 control chars is the point
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+    .replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
+    .replace(/[/\\<>:"|?*]/g, '')
     .trim()
     .slice(0, MAX_NAME_LENGTH)
+    .replace(/[. ]+$/, '')
     .trim()
 
-  // `.` and `..` survive the filter above but are not filenames.
-  if (cleaned.length === 0 || cleaned === '.' || cleaned === '..') return DEFAULT_NAME
+  // Dot-only names and Windows reserved device names are not usable filenames.
+  if (cleaned.length === 0 || /^\.+$/.test(cleaned) || WINDOWS_RESERVED_NAME.test(cleaned)) {
+    return DEFAULT_NAME
+  }
   return cleaned
 }
 
@@ -75,21 +86,29 @@ export function hasUtf8Bom(bytes: Uint8Array): boolean {
   return bytes.length >= 3 && UTF8_BOM_BYTES.every((byte, index) => bytes[index] === byte)
 }
 
-function countMatches(text: string, pattern: RegExp): number {
-  return (text.match(pattern) ?? []).length
-}
-
 /**
  * The dominant line ending of `text`, which is still in its original form.
- * A file with no line break at all counts as `\n`, and a genuinely mixed file
- * cannot round-trip whatever we pick — the majority ending loses the least.
+ * Single O(1)-memory pass: avoids allocating global regex match arrays on
+ * large files.
  */
 export function detectLineEnding(text: string): LineEnding {
-  const crlf = countMatches(text, /\r\n/g)
-  const cr = countMatches(text, /\r(?!\n)/g)
+  let crlf = 0
+  let cr = 0
+  let lf = 0
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i)
+    if (code === 13) {
+      if (text.charCodeAt(i + 1) === 10) {
+        crlf += 1
+        i += 1
+      } else {
+        cr += 1
+      }
+    } else if (code === 10) {
+      lf += 1
+    }
+  }
   if (crlf === 0 && cr === 0) return '\n'
-
-  const lf = countMatches(text, /(?<!\r)\n/g)
   if (crlf >= cr && crlf >= lf) return '\r\n'
   if (cr >= lf) return '\r'
   return '\n'

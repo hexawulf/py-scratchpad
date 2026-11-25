@@ -29,6 +29,7 @@ import {
   DEFAULT_NAME,
   isLineEnding,
   type LineEnding,
+  sanitizeFilename,
 } from './files.ts'
 import { isRunMode, type RunMode } from './protocol.ts'
 
@@ -200,7 +201,7 @@ function migrate(parsed: unknown, defaultTheme: ThemeName): ScratchpadState | nu
 function readState(parsed: Record<string, unknown>, defaultTheme: ThemeName): ScratchpadState {
   const buffer = isRecord(parsed.buffer) ? parsed.buffer : {}
   const content = typeof buffer.content === 'string' ? buffer.content : ''
-  const name = typeof buffer.name === 'string' && buffer.name.length > 0 ? buffer.name : DEFAULT_NAME
+  const name = typeof buffer.name === 'string' ? sanitizeFilename(buffer.name) : DEFAULT_NAME
 
   return {
     version: SCHEMA_VERSION,

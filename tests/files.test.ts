@@ -7,6 +7,7 @@ import {
   encodeFile,
   hasUtf8Bom,
   isLineEnding,
+  MAX_OPEN_FILE_BYTES,
   needsOpenConfirm,
   sanitizeFilename,
   toLf,
@@ -21,30 +22,42 @@ describe('sanitizeFilename', () => {
     expect(sanitizeFilename('no extension')).toBe('no extension')
   })
 
-  it('strips path separators so the name cannot escape the download folder', () => {
+  it('strips path separators and Windows-illegal characters', () => {
     expect(sanitizeFilename('../../etc/passwd')).toBe('....etcpasswd')
-    expect(sanitizeFilename('C:\\Windows\\evil.py')).toBe('C:Windowsevil.py')
+    expect(sanitizeFilename('C:\\Windows\\evil.py')).toBe('CWindowsevil.py')
     expect(sanitizeFilename('/absolute.py')).toBe('absolute.py')
+    expect(sanitizeFilename('<exec>')).toBe('exec')
+    expect(sanitizeFilename('a<b>c:d"e|f?g*h.py')).toBe('abcdefgh.py')
   })
 
-  it('strips control characters, including a newline or a NUL', () => {
+  it('strips control characters, C1 controls, and Unicode Bidi overrides', () => {
     expect(sanitizeFilename('a\u0000b\nc.py')).toBe('abc.py')
     expect(sanitizeFilename('tab\there.py')).toBe('tabhere.py')
     expect(sanitizeFilename('del\u007f.py')).toBe('del.py')
+    expect(sanitizeFilename('c1\u0085\u009f.py')).toBe('c1.py')
+    expect(sanitizeFilename('spoof\u202eyp.exe')).toBe('spoofyp.exe')
+    expect(sanitizeFilename('\ufeffbom\u200bname.py')).toBe('bomname.py')
   })
 
-  it('falls back to the default for anything unusable', () => {
+  it('falls back to the default for dot-only, reserved Windows, or unusable names', () => {
     expect(sanitizeFilename('')).toBe(DEFAULT_NAME)
     expect(sanitizeFilename('   ')).toBe(DEFAULT_NAME)
     expect(sanitizeFilename('///')).toBe(DEFAULT_NAME)
     expect(sanitizeFilename('.')).toBe(DEFAULT_NAME)
     expect(sanitizeFilename('..')).toBe(DEFAULT_NAME)
+    expect(sanitizeFilename('...')).toBe(DEFAULT_NAME)
     expect(sanitizeFilename('\u0001\u0002')).toBe(DEFAULT_NAME)
+    expect(sanitizeFilename('CON')).toBe(DEFAULT_NAME)
+    expect(sanitizeFilename('nul.py')).toBe(DEFAULT_NAME)
+    expect(sanitizeFilename('COM1.txt')).toBe(DEFAULT_NAME)
+    expect(sanitizeFilename('lpt9')).toBe(DEFAULT_NAME)
+    expect(sanitizeFilename('trailing.py... ')).toBe('trailing.py')
   })
 
-  it('trims surrounding whitespace and caps absurd lengths', () => {
+  it('trims surrounding whitespace, caps absurd lengths, and exposes a file size limit', () => {
     expect(sanitizeFilename('  spaced.py  ')).toBe('spaced.py')
     expect(sanitizeFilename(`${'x'.repeat(400)}.py`)).toHaveLength(120)
+    expect(MAX_OPEN_FILE_BYTES).toBe(2 * 1024 * 1024)
   })
 })
 

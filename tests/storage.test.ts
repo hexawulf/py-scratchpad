@@ -175,6 +175,26 @@ describe('save and load round-trip', () => {
 
     expect(load(storage).state.buffer).toMatchObject({ lineEnding: '\n', bom: false })
   })
+
+  it('sanitizes crafted buffer.name values loaded from storage', () => {
+    const storage = new MemoryStorage()
+    storage.items.set(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: SCHEMA_VERSION,
+        buffer: { name: '../bad\u0000\u202e<exec>.py', content: 'x = 1\n' },
+      }),
+    )
+    expect(load(storage).state.buffer.name).toBe('..badexec.py')
+
+    const reserved = parseState(
+      JSON.stringify({
+        version: SCHEMA_VERSION,
+        buffer: { name: 'CON.py', content: '' },
+      }),
+    )
+    expect(reserved?.buffer.name).toBe(DEFAULT_NAME)
+  })
 })
 
 describe('schema v1 migration', () => {

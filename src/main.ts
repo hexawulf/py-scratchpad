@@ -8,6 +8,7 @@ import {
   decodeFile,
   encodeFile,
   type FileMeta,
+  MAX_OPEN_FILE_BYTES,
   needsOpenConfirm,
   sanitizeFilename,
 } from './files.ts'
@@ -249,10 +250,14 @@ function showNotice(message: string, tone: NoticeTone, withActions = false): voi
 }
 
 function hideNotice(): void {
-  // A passing notice ("Opened a.py.") replaced the standing one; put it back,
+  // A passing notice ("Opened a.py.") replaced a standing one; put it back,
   // or the tab would be silently not saving with no button to change that.
   if (lockedNotice !== null) {
     showNoticeState(lockedNotice)
+    return
+  }
+  if (conflictPending) {
+    showNoticeState(CONFLICT_NOTICE)
     return
   }
   noticeEl.hidden = true
@@ -436,7 +441,7 @@ window.addEventListener('storage', (event) => {
     event: { key: event.key, newValue: event.newValue },
     storageKey: STORAGE_KEY,
     lastWritten,
-    paused: conflictPending,
+    paused: savingPaused(),
   })
   if (decision.kind !== 'pause') {
     if (decision.reason === 'same-document' && event.newValue !== null) {
@@ -493,8 +498,15 @@ function saveHereAnyway(): void {
     return
   }
 
-  const backupKey = lastWritten === null ? null : backupRaw(storage, lastWritten, new Date())
-  if (lastWritten !== null && backupKey === null) {
+  let liveRaw: string | null
+  try {
+    liveRaw = storage.getItem(STORAGE_KEY) ?? lastWritten
+  } catch {
+    liveRaw = lastWritten
+  }
+
+  const backupKey = liveRaw === null ? null : backupRaw(storage, liveRaw, new Date())
+  if (liveRaw !== null && backupKey === null) {
     lockedNotice = newerDataNotice(
       'A copy of the newer data could not be made, so it was left alone. Nothing typed here is being saved.',
     )
@@ -503,6 +515,7 @@ function saveHereAnyway(): void {
   }
 
   lockedNotice = null
+  conflictPending = false
   dirty = true
   hideNotice()
   flushSaveAndGuard()
@@ -609,6 +622,8 @@ filenameInput.addEventListener('change', applyFilename)
 // Import
 // ---------------------------------------------------------------------------
 
+let openRequestId = 0
+
 function applyOpenedFile(name: string, file: DecodedFile): void {
   bufferName = name
   fileMeta = { lineEnding: file.lineEnding, bom: file.bom }
@@ -620,21 +635,33 @@ function applyOpenedFile(name: string, file: DecodedFile): void {
   conflictPending = false
   dirty = true
   flushSaveAndGuard()
-  showNotice(`Opened ${name}.`, 'info')
+  if (!saveFailed && lockedNotice === null) showNotice(`Opened ${name}.`, 'info')
   editor.focus()
 }
 
 async function openFile(file: File): Promise<void> {
+  const requestId = ++openRequestId
   const name = sanitizeFilename(file.name)
+
+  if (file.size > MAX_OPEN_FILE_BYTES) {
+    showNotice(
+      `${name} is too large to open (limit is ${String(MAX_OPEN_FILE_BYTES / (1024 * 1024))} MB).`,
+      'error',
+    )
+    return
+  }
 
   let bytes: Uint8Array
   try {
     bytes = new Uint8Array(await file.arrayBuffer())
   } catch (error) {
+    if (requestId !== openRequestId) return
     const reason = error instanceof Error ? error.message : String(error)
     showNotice(`Could not read ${name}: ${reason}`, 'error')
     return
   }
+
+  if (requestId !== openRequestId) return
 
   const decoded = decodeFile(bytes)
   if (!decoded.ok) {
@@ -648,6 +675,8 @@ async function openFile(file: File): Promise<void> {
   ) {
     return
   }
+
+  if (requestId !== openRequestId) return
 
   applyOpenedFile(name, decoded.file)
 }
