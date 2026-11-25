@@ -299,11 +299,23 @@ describe('cross-origin isolation', () => {
     const csp = /Content-Security-Policy "([^"]+)"/.exec(HEADERS)?.[1] ?? ''
     expect(csp).toContain("default-src 'self'")
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'")
-    expect(csp).toContain("worker-src 'self'")
+    expect(csp).toContain("worker-src 'self';")
+    expect(csp).not.toContain('blob:')
+    expect(csp).toContain("form-action 'none'")
     // The no-CDN rule: the runtime is fetched from this origin only.
     expect(csp).toContain("connect-src 'self'")
     expect(csp).not.toContain('jsdelivr')
     expect(csp).not.toContain('unsafe-eval;')
+    expect(HEADERS).toContain('add_header X-Frame-Options "DENY" always;')
+    expect(HEADERS).toContain('add_header Cross-Origin-Resource-Policy "same-origin" always;')
+    expect(HEADERS).toContain('add_header Permissions-Policy "')
+  })
+
+  it('blocks non-GET/HEAD methods, dotfiles, and oversized request bodies in nginx', () => {
+    expect(NGINX).toContain('client_max_body_size 1k;')
+    expect(NGINX).toContain('error_page 405 = @method_not_allowed;')
+    expect(NGINX).toMatch(/location @method_not_allowed \{[\s\S]*?Cache-Control "no-store, no-transform"/)
+    expect(NGINX).toMatch(/location ~ \/\\\. \{[\s\S]*?return 404/)
   })
 
   it('never lets Pyodide fall back to a CDN for packages', () => {

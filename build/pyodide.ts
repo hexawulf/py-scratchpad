@@ -138,6 +138,18 @@ export function stagePyodide(outDir: string, version: string): PyodideStageResul
   return { version, files }
 }
 
+/** Parse `add_header Name "Value" always;` directives from `docker/security-headers.conf`. */
+function loadProductionHeaders(): [string, string][] {
+  const conf = readFileSync(join(repoRoot(), 'docker/security-headers.conf'), 'utf8')
+  const headers: [string, string][] = []
+  for (const match of conf.matchAll(/^\s*add_header\s+([^\s]+)\s+"([^"]+)"\s+always;/gm)) {
+    const name = match[1]
+    const value = match[2]
+    if (name !== undefined && value !== undefined) headers.push([name, value])
+  }
+  return headers
+}
+
 /**
  * The plugin. On a build it stages the files into `dist/`; in dev and preview
  * it serves them out of `node_modules`, so `npm run dev` needs no copy step
@@ -146,58 +158,76 @@ export function stagePyodide(outDir: string, version: string): PyodideStageResul
  * `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` are set on
  * every dev and preview response, because `crossOriginIsolated` — and with it
  * `SharedArrayBuffer`, the interrupt buffer and the `input()` bridge — is only
- * true when they are. Production sets them in `docker/security-headers.conf`;
- * setting them here is what makes dev behave like prod.
+ * true when they are. Preview also mirrors the full `docker/security-headers.conf`
+ * set (including CSP) so `npm run test:e2e` catches CSP regressions in CI.
  */
 export function pyodidePlugin(): Plugin {
   const version = pyodideVersion()
 
-  function serve(server: {
-    middlewares: {
-      use: (
-        handler: (
-          req: { url?: string },
-          res: {
-            setHeader: (name: string, value: string) => void
-            statusCode: number
-            end: (body?: string | Uint8Array) => void
-          },
-          next: () => void,
-        ) => void,
-      ) => void
+  function createMiddleware(includeProdHeaders: boolean) {
+    return (server: {
+      middlewares: {
+        use: (
+          handler: (
+            req: { method?: string; url?: string },
+            res: {
+              setHeader: (name: string, value: string) => void
+              statusCode: number
+              end: (body?: string | Uint8Array) => void
+            },
+            next: () => void,
+          ) => void,
+        ) => void
+      }
+    }): void => {
+      const prodHeaders = includeProdHeaders ? loadProductionHeaders() : []
+      server.middlewares.use((req, res, next) => {
+        // Isolation is a document-level property, so the headers belong on every
+        // response the server makes, not only on the runtime files.
+        res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+        res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
+        for (const [name, value] of prodHeaders) {
+          if (name === 'Cross-Origin-Opener-Policy' || name === 'Cross-Origin-Embedder-Policy') {
+            continue
+          }
+          res.setHeader(name, value)
+        }
+
+        const urlPath = (req.url ?? '').split('?')[0]
+        if (urlPath === undefined || !urlPath.startsWith(`${PYODIDE_URL_PREFIX}/`)) {
+          next()
+          return
+        }
+
+        const method = (req.method ?? 'GET').toUpperCase()
+        if (method !== 'GET' && method !== 'HEAD') {
+          res.statusCode = 405
+          res.setHeader('Allow', 'GET, HEAD')
+          res.setHeader('Cache-Control', 'no-store, no-transform')
+          res.end('405 Method Not Allowed\n')
+          return
+        }
+
+        const file = resolveRuntimeRequest(urlPath, version)
+        if (file === null) {
+          res.statusCode = 404
+          res.end('404 Not Found\n')
+          return
+        }
+
+        res.setHeader('Content-Type', contentTypeFor(urlPath))
+        res.setHeader('Cache-Control', 'no-cache')
+        res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+        res.end(method === 'HEAD' ? undefined : readFileSync(file))
+      })
     }
-  }): void {
-    server.middlewares.use((req, res, next) => {
-      // Isolation is a document-level property, so the headers belong on every
-      // response the server makes, not only on the runtime files.
-      res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-      res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
-
-      const urlPath = (req.url ?? '').split('?')[0]
-      if (urlPath === undefined || !urlPath.startsWith(`${PYODIDE_URL_PREFIX}/`)) {
-        next()
-        return
-      }
-
-      const file = resolveRuntimeRequest(urlPath, version)
-      if (file === null) {
-        res.statusCode = 404
-        res.end('404 Not Found\n')
-        return
-      }
-
-      res.setHeader('Content-Type', contentTypeFor(urlPath))
-      res.setHeader('Cache-Control', 'no-cache')
-      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
-      res.end(readFileSync(file))
-    })
   }
 
   return {
     name: 'py-scratchpad:pyodide',
 
-    configureServer: serve,
-    configurePreviewServer: serve,
+    configureServer: createMiddleware(false),
+    configurePreviewServer: createMiddleware(true),
 
     // writeBundle, not generateBundle: the files are copied straight to disk
     // rather than held in rollup's asset map, which keeps a 9.6 MB wasm out of

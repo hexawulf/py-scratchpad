@@ -67,7 +67,11 @@ test('loads with no console error and no CSP violation', async ({ page }) => {
     problems.push(`requestfailed: ${request.url()}`)
   })
 
-  await page.goto('/')
+  const response = await page.goto('/')
+  const csp = response?.headers()['content-security-policy'] ?? ''
+  expect(csp).toContain("default-src 'self'")
+  expect(csp).toContain("form-action 'none'")
+  expect(csp).not.toContain('blob:')
   await expect(page.locator('#editor .cm-content')).toBeVisible()
 
   // The move notice only belongs on python.piapps.dev, and nothing else should
