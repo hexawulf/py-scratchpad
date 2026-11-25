@@ -292,3 +292,57 @@ describe('ending a run', () => {
     expect(result.err).toContain('EOFError')
   })
 })
+
+describe('runner isolation and edge cases', () => {
+  it('evicts previous buffer source from linecache after a run ends', () => {
+    expect(runOnce('secret_marker = "prior-buffer"\n', 'first.py', 'script').status).toBe('ok')
+    const second = runOnce('import linecache\nprint("first.py" in linecache.cache)\n', 'second.py', 'script')
+    expect(second.status).toBe('ok')
+    expect(second.out).toBe('False\n')
+  })
+
+  it('strips runner frames even when the buffer filename is <exec>', () => {
+    const result = runOnce('1 / 0\n', '<exec>', 'script')
+    expect(result.status).toBe('error')
+    expect(result.err).not.toContain('pyscratch_run')
+    expect(result.err).toContain('ZeroDivisionError')
+  })
+
+  it('handles compile SyntaxError/ValueError on NUL bytes cleanly', () => {
+    const nullSource = runOnce('x = 1\x00\n', FILENAME, 'script')
+    expect(nullSource.status).toBe('error')
+    expect(nullSource.err).toContain('null bytes')
+
+    const nullFilename = runOnce('x = 1\n', 'bad\x00.py', 'script')
+    expect(nullFilename.status).toBe('error')
+    expect(nullFilename.err).toContain('ValueError')
+  })
+
+  it('restores sys.stderr and sys.displayhook after a run mutates them', () => {
+    const first = runOnce('import sys\nsys.stderr = None\nsys.displayhook = lambda x: None\n', FILENAME, 'script')
+    expect(first.status).toBe('ok')
+
+    const second = runOnce('1 + 1\n', FILENAME, 'repl')
+    expect(second.status).toBe('ok')
+    expect(second.out).toBe('2\n')
+
+    const third = runOnce('1 / 0\n', FILENAME, 'script')
+    expect(third.status).toBe('error')
+    expect(third.err).toContain('ZeroDivisionError')
+  })
+
+  it('handles deep exception chains without RecursionError', () => {
+    const source = [
+      'exc = ValueError("root")',
+      'for i in range(200):',
+      '    nxt = ValueError(f"e{i}")',
+      '    nxt.__cause__ = exc',
+      '    exc = nxt',
+      'raise exc',
+    ].join('\n')
+    const result = runOnce(source, FILENAME, 'script')
+    expect(result.status).toBe('error')
+    expect(result.err).toContain('ValueError: e199')
+    expect(result.err).not.toContain('RecursionError')
+  })
+})

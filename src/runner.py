@@ -81,11 +81,13 @@ def _fresh_namespace(filename):
 def _register_source(source, filename):
     """Let :mod:`traceback` show the offending line of a buffer that is not a file.
 
-    The ``None`` in the mtime slot is the convention for an entry that is not
-    backed by a real file: :func:`linecache.checkcache` then leaves it alone
-    instead of dropping it because it cannot stat it.
+    Refuses to overwrite absolute stdlib/filesystem paths and returns whether
+    an entry was registered so ``pyscratch_run`` can evict it after the run.
     """
+    if not filename or filename.startswith("/") or filename in linecache.cache:
+        return False
     linecache.cache[filename] = (len(source), None, source.splitlines(True), filename)
+    return True
 
 
 def _compile_statements(source, filename, mode):
@@ -110,29 +112,44 @@ def _compile_statements(source, filename, mode):
     return [compile(ast.Interactive(body=[stmt]), filename, "single") for stmt in tree.body]
 
 
-def _strip_runtime_frames(exc, filename, seen=None):
+def _strip_runtime_frames(exc, filename):
     """Drop the frames above the user's code, through the whole exception chain.
 
-    A traceback starts at this module's ``exec`` call, so the first frames name
-    whatever file Pyodide compiled this source as. Only the *leading* frames go:
-    a frame deeper in the standard library is genuinely part of the story and
-    stays. ``__cause__`` and ``__context__`` are walked too, because
-    ``raise ... from ...`` inside the buffer produces a second traceback that
-    also begins above the user's code.
+    Iterative to avoid :exc:`RecursionError` on deep ``__cause__`` chains.
+    Strips frames up to and including :func:`pyscratch_run` (so a buffer named
+    ``<exec>`` never collides with the runner), falling back to leading
+    non-buffer frames.
     """
-    if seen is None:
-        seen = set()
+    runner_code = pyscratch_run.__code__
+    seen = set()
+    stack = [exc]
 
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
 
-        tb = exc.__traceback__
-        while tb is not None and tb.tb_frame.f_code.co_filename != filename:
-            tb = tb.tb_next
-        exc.__traceback__ = tb
+        tb = current.__traceback__
+        probe = tb
+        after_runner = None
+        while probe is not None:
+            if probe.tb_frame.f_code is runner_code:
+                after_runner = probe.tb_next
+                break
+            probe = probe.tb_next
 
-        _strip_runtime_frames(exc.__cause__, filename, seen)
-        exc = exc.__context__
+        if after_runner is not None:
+            tb = after_runner
+        else:
+            while tb is not None and tb.tb_frame.f_code.co_filename != filename:
+                tb = tb.tb_next
+        current.__traceback__ = tb
+
+        if current.__context__ is not None:
+            stack.append(current.__context__)
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
 
 
 def _format_traceback(exc, filename):
@@ -169,33 +186,45 @@ def pyscratch_run(source, filename, mode):
     pointed at the output panel; this returns only a status string, so nothing
     has to be converted across the JS boundary.
     """
-    _register_source(source, filename)
+    saved_stdout = sys.stdout
+    saved_stderr = sys.stderr
+    saved_stdin = sys.stdin
+    saved_displayhook = sys.displayhook
+    registered = _register_source(source, filename)
 
     try:
-        codes = _compile_statements(source, filename, mode)
-    except SyntaxError as exc:
-        sys.stderr.write(_format_syntax_error(exc))
-        return STATUS_ERROR
-
-    namespace = _fresh_namespace(filename)
-
-    for code in codes:
         try:
-            exec(code, namespace)  # noqa: S102 - running the user's buffer is the point
-        except KeyboardInterrupt:
-            # Stop was pressed and the interrupt buffer delivered a SIGINT.
-            sys.stderr.write("KeyboardInterrupt\n")
-            return STATUS_INTERRUPT
-        except SystemExit as exc:
-            code_value = exc.code
-            if code_value not in (None, 0):
-                sys.stderr.write(f"SystemExit: {code_value}\n")
-            return STATUS_EXIT
-        except ModuleNotFoundError as exc:
-            sys.stderr.write(_explain_missing_module(exc) + "\n")
-            return STATUS_ERROR
-        except BaseException as exc:  # noqa: BLE001 - the buffer may raise anything
-            sys.stderr.write(_format_traceback(exc, filename))
+            codes = _compile_statements(source, filename, mode)
+        except (SyntaxError, ValueError) as exc:
+            saved_stderr.write(_format_syntax_error(exc))
             return STATUS_ERROR
 
-    return STATUS_OK
+        namespace = _fresh_namespace(filename)
+
+        for code in codes:
+            try:
+                exec(code, namespace)  # noqa: S102 - running the user's buffer is the point
+            except KeyboardInterrupt:
+                # Stop was pressed and the interrupt buffer delivered a SIGINT.
+                saved_stderr.write("KeyboardInterrupt\n")
+                return STATUS_INTERRUPT
+            except SystemExit as exc:
+                code_value = exc.code
+                if code_value not in (None, 0):
+                    saved_stderr.write(f"SystemExit: {code_value}\n")
+                return STATUS_EXIT
+            except ModuleNotFoundError as exc:
+                saved_stderr.write(_explain_missing_module(exc) + "\n")
+                return STATUS_ERROR
+            except BaseException as exc:  # noqa: BLE001 - the buffer may raise anything
+                saved_stderr.write(_format_traceback(exc, filename))
+                return STATUS_ERROR
+
+        return STATUS_OK
+    finally:
+        sys.stdout = saved_stdout
+        sys.stderr = saved_stderr
+        sys.stdin = saved_stdin
+        sys.displayhook = saved_displayhook
+        if registered:
+            linecache.cache.pop(filename, None)
