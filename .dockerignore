@@ -7,9 +7,16 @@
 .gitattributes
 .gitignore
 .dockerignore
+.env
+.env.*
+docker-compose*.yml*
+*.bak*
+.DS_Store
+*.sw?
 node_modules
 dist
 dist-ssr
+public/pyodide/
 tests
 docs
 *.md
@@ -21,8 +28,11 @@ docs
 
 # Playwright
 playwright.config.ts
+playwright.screenshots.config.ts
 test-results
 playwright-report
+blob-report
+playwright/.cache
 
 # Dev scripts — not needed to produce dist/
 scripts

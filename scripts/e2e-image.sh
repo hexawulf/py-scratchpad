@@ -59,8 +59,12 @@ say "starting ${NAME} on ${BASE_URL} (read-only, as production runs it)"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true
 docker run -d --name "${NAME}" \
     -p "127.0.0.1:${PORT}:80" \
-    --read-only --memory 64m \
-    --tmpfs /var/cache/nginx --tmpfs /var/run --tmpfs /tmp \
+    --read-only --memory 64m --pids-limit 64 \
+    --cap-drop=ALL --cap-add=CHOWN --cap-add=NET_BIND_SERVICE --cap-add=SETGID --cap-add=SETUID \
+    --security-opt=no-new-privileges:true \
+    --tmpfs /var/cache/nginx:noexec,nosuid,nodev,size=16m \
+    --tmpfs /var/run:noexec,nosuid,nodev,size=1m \
+    --tmpfs /tmp:noexec,nosuid,nodev,size=4m \
     "${IMAGE}" >>"${LOG}" 2>&1
 
 for _ in $(seq 1 30); do
@@ -79,7 +83,7 @@ fi
 # in the browser, so a failure names the file.
 say "checking the runtime's Content-Types"
 status=0
-VERSION="$(node -p 'require("'"${REPO}"'/package.json").dependencies.pyodide')"
+VERSION="$(node -e 'process.stdout.write(require(process.argv[1]).dependencies.pyodide)' "${REPO}/package.json")"
 while read -r file expected; do
     [ -n "${file}" ] || continue
     got="$(curl -s -o /dev/null -w '%{content_type}' "${BASE_URL}/pyodide/${VERSION}/${file}")"
@@ -138,6 +142,25 @@ else
         fail "${asset}: expected Cache-Control '${expected}', got '${got}'"
         status=1
     fi
+fi
+
+say "checking HTTP method restriction and dotfile blocking"
+post_code="$(curl -s -X POST -o /dev/null -w '%{http_code}' "${BASE_URL}/")"
+post_cc="$(curl -s -X POST -o /dev/null -D - "${BASE_URL}/" | grep -i '^cache-control:' | tr -d '\r' | sed 's/^[Cc]ache-[Cc]ontrol: *//')"
+if [ "${post_code}" = "405" ] && [ "${post_cc}" = "no-store, no-transform" ]; then
+    printf '  %-28s %s (%s)\n' "POST /" "${post_code}" "${post_cc}" | tee -a "${LOG}"
+else
+    fail "POST /: expected 405 + 'no-store, no-transform', got ${post_code} + '${post_cc}'"
+    status=1
+fi
+
+dot_code="$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/.env")"
+dot_cc="$(curl -s -o /dev/null -D - "${BASE_URL}/.env" | grep -i '^cache-control:' | tr -d '\r' | sed 's/^[Cc]ache-[Cc]ontrol: *//')"
+if [ "${dot_code}" = "404" ] && [ "${dot_cc}" = "no-store, no-transform" ]; then
+    printf '  %-28s %s (%s)\n' "GET /.env" "${dot_code}" "${dot_cc}" | tee -a "${LOG}"
+else
+    fail "GET /.env: expected 404 + 'no-store, no-transform', got ${dot_code} + '${dot_cc}'"
+    status=1
 fi
 
 [ "${status}" -eq 0 ] || exit 1

@@ -35,3 +35,7 @@ public/pyodide/
 
 # Real host names and addresses behind the docs' placeholders (docs/DEPLOY.md §0)
 docs/deploy.local.env
+
+# Local rollback backups (prefer ~/backups/ outside the repo)
+docker-compose.yml.bak-*
+*.bak-*

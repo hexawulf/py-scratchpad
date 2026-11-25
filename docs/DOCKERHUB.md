@@ -54,11 +54,21 @@ services:
     ports:
       - '127.0.0.1:5040:80' # put a TLS reverse proxy in front
     mem_limit: 64m
+    pids_limit: 64
     read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
-      - /tmp
+      - /var/cache/nginx:noexec,nosuid,nodev,size=16m
+      - /var/run:noexec,nosuid,nodev,size=1m
+      - /tmp:noexec,nosuid,nodev,size=4m
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/']
       interval: 30s
@@ -152,7 +162,7 @@ wrong).
 | Volume      | none — there is no server-side state to persist                       |
 | User        | nginx's default: master as root, worker processes as `nginx`          |
 | Healthcheck | not baked in; the Compose snippet above adds one with busybox `wget`  |
-| Base        | `nginx:1.30.7-alpine3.24`, built with `node:22.23.3-alpine3.24`       |
+| Base        | `nginx:1.30.8-alpine3.24-slim`, built with `node:22.23.5-alpine3.24`  |
 | Size        | about 36 MB compressed (84 MB on disk, arm64); 5–15 MiB RAM           |
 | Runtime     | Pyodide 314.0.8 (CPython 3.14.2), 13 MB served from `/pyodide/`       |
 

@@ -1,20 +1,18 @@
 # syntax=docker/dockerfile:1
 # py-scratchpad — static site image.
-# Stage 1 builds dist/ with Vite; stage 2 serves it with nginx. Both base images
-# are multi-arch (linux/amd64 for x86 workstations, linux/arm64 for the Pi deploy host) and pinned
-# to an exact patch version so a rebuild is reproducible.
+# Stage 1 builds dist/ with Vite; stage 2 serves it with nginx-slim. Base
+# images are literal and pinned by exact tag + multi-arch digest so Dependabot
+# can update them automatically and tags cannot silently drift. Note that
+# byte-reproducibility applies to the dist/ web bundle (via SOURCE_DATE_EPOCH);
+# Stage 2 runs `apk upgrade --no-cache` to pull Alpine security fixes.
 #
 #   docker buildx build --platform linux/amd64,linux/arm64 -t 0xwulf/py-scratchpad .
 #   docker build -t py-scratchpad:dev .     # local, this machine's arch
 
-ARG NODE_VERSION=22.23.3
-ARG ALPINE_VERSION=3.24
-ARG NGINX_VERSION=1.30.7
-
 # --- build: produce dist/ -----------------------------------------------------
 # $BUILDPLATFORM-pinned: dist/ is byte-identical on every arch, so the bundle is
 # built once natively instead of a second time under QEMU emulation.
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS build
+FROM --platform=$BUILDPLATFORM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
 # The About dialog's build date comes from the source's own timestamp, never
 # from the build clock (see vite.config.ts). .dockerignore excludes .git, so
 # `git log` cannot be the source here: release.yml passes the tagged commit's
@@ -24,13 +22,18 @@ ARG SOURCE_DATE_EPOCH=
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 WORKDIR /app
 # Copy the manifests first so the npm layer is cached while sources change.
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
+COPY .npmrc package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+# Copy only build inputs explicitly rather than the entire context.
+COPY index.html vite.config.ts tsconfig.json ./
+COPY build ./build
+COPY public ./public
+COPY src ./src
+COPY vendor ./vendor
 RUN npm run build
 
 # --- runtime: serve dist/ -----------------------------------------------------
-FROM nginx:${NGINX_VERSION}-alpine${ALPINE_VERSION}
+FROM nginx:1.30.8-alpine3.24-slim@sha256:e9eaa7298465eab06d618c51556fdcf3fb5061f9ff40bd28ee898fbd7ee7f900
 # The nginx tag is rebuilt upstream only now and then, so pull in Alpine's
 # security fixes at build time. release.yml's Trivy gate fails a release on a
 # fixable CRITICAL; 0.3.5 shipped with brotli-libs CVE-2026-111497 unpatched.

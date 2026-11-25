@@ -23,11 +23,21 @@ services:
     ports:
       - "${PY_SCRATCHPAD_BIND_ADDR:-127.0.0.1}:5040:80"
     mem_limit: 64m
+    pids_limit: 64
     read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
-      - /tmp
+      - /var/cache/nginx:noexec,nosuid,nodev,size=16m
+      - /var/run:noexec,nosuid,nodev,size=1m
+      - /tmp:noexec,nosuid,nodev,size=4m
     healthcheck:
       # busybox wget, already in the nginx alpine image.
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
